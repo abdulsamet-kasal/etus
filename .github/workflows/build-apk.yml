@@ -1,4 +1,4 @@
-name: Build & Release ETUS Android APK
+name: Build, Test & Release ETUS Android APK
 
 on:
   push:
@@ -9,8 +9,53 @@ permissions:
   contents: write
 
 jobs:
+  # 1) Hızlı geri bildirim: statik analiz + birim testleri.
+  #    Elle yapılan doğrulamayı CI'ye taşır; APK derlemesi saatler sürmeden
+  #    hatalı kod main'e girmesin diye build'den önce koşar.
+  analyze-and-test:
+    name: Analyze & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          # Yerel geliştirmeyle birebir aynı sürüm (Flutter 3.24.5 / Dart 3.5.4).
+          # '3.24.x' gibi aralık vermek, Flutter Gradle eklentisi davranışı
+          # değiştiğinde (bkz. pubspec.yaml içindeki geolocator_android notu)
+          # sebepsiz kırılmalara yol açar.
+          flutter-version: '3.24.5'
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        working-directory: etus_mobile
+        run: flutter pub get
+
+      - name: Verify Dependencies Are Locked
+        working-directory: etus_mobile
+        run: |
+          if ! git diff --quiet -- pubspec.lock; then
+            echo "::error::pubspec.lock değişti — bağımlılıklar kilitli değil. 'flutter pub get' çıktısını commit'leyin."
+            git --no-pager diff -- pubspec.lock
+            exit 1
+          fi
+
+      - name: Static Analysis
+        working-directory: etus_mobile
+        run: flutter analyze
+
+      - name: Unit & Widget Tests
+        working-directory: etus_mobile
+        run: flutter test --reporter expanded
+
+  # 2) Yalnızca analiz + testler geçtikten sonra release APK derlenir.
   build:
     name: Build Flutter Release APK
+    needs: analyze-and-test
     runs-on: ubuntu-latest
 
     steps:
@@ -26,22 +71,68 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.x'
+          flutter-version: '3.24.5'
           channel: 'stable'
+          cache: true
 
       - name: Install Dependencies
-        run: |
-          cd etus_mobile
-          flutter pub get
+        working-directory: etus_mobile
+        run: flutter pub get
 
       - name: Build Release APK
-        run: |
-          cd etus_mobile
-          flutter build apk --release
+        working-directory: etus_mobile
+        run: flutter build apk --release
 
-      - name: Upload to Release
+      - name: Read Version From pubspec.yaml
+        id: version
+        working-directory: etus_mobile
+        run: |
+          # version: 1.2.0+3  ->  tag: v1.2.0
+          VERSION=$(grep -m1 '^version:' pubspec.yaml | sed -E 's/^version:[[:space:]]*//; s/\+.*$//' | tr -d '\r')
+          if [ -z "$VERSION" ]; then
+            echo "::error::pubspec.yaml içinde version satırı okunamadı."
+            exit 1
+          fi
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "title=ETUS v$VERSION - Edirne Akıllı Toplu Ulaşım Asistanı" >> "$GITHUB_OUTPUT"
+          echo "asset=ETUS-v$VERSION.apk" >> "$GITHUB_OUTPUT"
+          echo "Sürüm: v$VERSION"
+
+      # Yayınlanan dosya adı, elle yapılan sürümlerdeki adlandırmayla aynı olsun
+      # (releases/ETUS-vX.Y.Z.apk) diye APK sürüm adıyla kopyalanır.
+      - name: Prepare Versioned APK Name
+        working-directory: etus_mobile
+        run: |
+          SRC="build/app/outputs/flutter-apk/app-release.apk"
+          DEST="build/app/outputs/flutter-apk/${{ steps.version.outputs.asset }}"
+          cp "$SRC" "$DEST"
+          ls -l "$DEST"
+
+      - name: Check Whether Release Already Exists
+        id: release_check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release ${{ steps.version.outputs.tag }} zaten var; yalnızca derleme doğrulandı."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload APK to GitHub Release
+        if: steps.release_check.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.0
-          files: etus_mobile/build/app/outputs/flutter-apk/app-release.apk
-          name: ETUS v1.0.0 - Edirne Akıllı Toplu Ulaşım Asistanı
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.title }}
+          generate_release_notes: true
+          files: etus_mobile/build/app/outputs/flutter-apk/${{ steps.version.outputs.asset }}
+
+      - name: Upload APK as Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: etus-release-apk
+          path: etus_mobile/build/app/outputs/flutter-apk/${{ steps.version.outputs.asset }}
+          if-no-files-found: error
+          retention-days: 14
