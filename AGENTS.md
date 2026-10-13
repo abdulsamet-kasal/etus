@@ -32,3 +32,5 @@
 - Tasarım: harita FAB'ı (hedef seçildiğinde), kalkış kartı durumu (GPS/elle), rota kartında ikincil "Toplu Taşıma" butonu.
 - Dep bağımlılıkları: `http`, `flutter_map`, `latlong2`. Sürüm `1.2.0+3`.
 - Ajan kullanımı: `engineering/mobile-app-builder` (offline-first, platform-uyumlu) + `design/ui-designer` (tutarlı kart/tipografi) kişilikleri; tüm adımlar bu günlüğe işlendi.
+- Doğrulama: `flutter analyze` temiz, 6/6 test geçti, release APK derlendi (21.2 MB).
+- **Push:** commit `a5d93b4` → `origin/main`; **GitHub Release v1.2.0** oluşturuldu — `ETUS-v1.2.0.apk` (22.215.261 bayt, `gh release view` ile doğrulandı).
