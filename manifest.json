@@ -1,0 +1,16 @@
+{
+  "name": "ETUS Akıllı Rota Bulucu",
+  "short_name": "ETUS",
+  "description": "Edirne Toplu Ulaşım Sistemi Akıllı Rota ve Durak Rehberi",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1E40AF",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%231E40AF'><rect width='24' height='24' rx='6' fill='%232563EB'/><path fill='white' d='M8 7h8m-8 4h8m-4 4v4m-5-8h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v4a2 2 0 002 2z'/></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}
