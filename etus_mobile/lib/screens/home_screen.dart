@@ -128,7 +128,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
         list.add(JourneyOption(
           route: route,
-          subStops: subStops,
+          subStopIds: subStops,
           stopCount: stopCount,
           busDurationMinutes: busDuration,
           walkDurationMinutes: walkDuration,
@@ -312,9 +312,9 @@ class _HomeScreenState extends State<HomeScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: Colors.emerald.shade50,
+                color: Colors.green.shade50,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.emerald.shade200),
+                border: Border.all(color: Colors.green.shade200),
               ),
               child: Row(
                 children: [
@@ -325,7 +325,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
-                        color: Colors.emerald.shade800,
+                        color: Colors.green.shade800,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -333,7 +333,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                     decoration: BoxDecoration(
-                      color: Colors.emerald.shade200,
+                      color: Colors.green.shade200,
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
@@ -341,7 +341,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
-                        color: Colors.emerald.shade900,
+                        color: Colors.green.shade900,
                       ),
                     ),
                   ),
@@ -624,16 +624,16 @@ class _HomeScreenState extends State<HomeScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: Colors.emerald.shade50,
+                color: Colors.green.shade50,
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: Colors.emerald.shade200),
+                border: Border.all(color: Colors.green.shade200),
               ),
               child: Text(
                 'Aktarmasız',
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
-                  color: Colors.emerald.shade800,
+                  color: Colors.green.shade800,
                 ),
               ),
             ),

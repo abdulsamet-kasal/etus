@@ -193,7 +193,7 @@ class _RouteCardState extends State<RouteCard> {
                 // Adım 3: İniş
                 _buildStep(
                   stepNumber: '3',
-                  stepColor: Colors.emerald,
+                  stepColor: Colors.green,
                   title: 'Hedef Durakta İnin',
                   subtitle: '${widget.destinationStop.name} durağında inin.',
                 ),
@@ -257,7 +257,7 @@ class _RouteCardState extends State<RouteCard> {
                                 height: 18,
                                 decoration: BoxDecoration(
                                   color: isFirst
-                                      ? Colors.emerald
+                                      ? Colors.green
                                       : (isLast ? Colors.red : Colors.grey.shade300),
                                   shape: BoxShape.circle,
                                 ),
