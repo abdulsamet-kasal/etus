@@ -8,9 +8,13 @@ import '../data/etus_data.dart';
 import '../models/stop.dart';
 import '../services/kentkart_api.dart';
 import '../services/location_service.dart';
+import '../widgets/kentkart_status_banner.dart';
+import '../widgets/stop_detail_sheet.dart';
 
 /// Uygulama içi OpenStreetMap haritası:
 /// - OSM döşemeleri (API anahtarı gerektirmez)
+/// - **Tüm ETUS durakları** katmanı; bir durağa dokununca o duraktan geçen
+///   hatlar ve yaklaşan canlı otobüsler açılır
 /// - Başlangıç (kalkış) ve varış noktası seçimi (dokunarak veya GPS)
 /// - Kentkart'tan canlı otobüs konumları (10 sn'de bir yenilenir)
 /// - Seçilen duraklar arası güzergâh çizgisi
@@ -38,6 +42,7 @@ class _MapScreenState extends State<MapScreen> {
   KentkartCatalog? _catalog;
   bool _loadingCatalog = true;
   String? _catalogError;
+  bool _showStops = true;
 
   List<KentkartLiveBus> _buses = [];
   Timer? _busTimer;
@@ -75,7 +80,8 @@ class _MapScreenState extends State<MapScreen> {
         _origin = const LatLng(41.6752, 26.5548);
       }
     } catch (e) {
-      setState(() => _catalogError = 'Hat/durak verisi çekilemedi: $e');
+      setState(() => _catalogError =
+          'Canlı durak listesi alınamadı; harita yine de kullanılabilir.');
     } finally {
       setState(() => _loadingCatalog = false);
     }
@@ -83,21 +89,23 @@ class _MapScreenState extends State<MapScreen> {
 
   void _startBusTimer() {
     _busTimer?.cancel();
-    _busTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadBuses());
+    _busTimer =
+        Timer.periodic(const Duration(seconds: 10), (_) => _loadBuses());
     _loadBuses();
   }
 
   Future<void> _loadBuses() async {
     final ref = _origin ?? _destination;
     if (ref == null) return;
-    setState(() => _loadingBuses = true);
+    if (mounted) setState(() => _loadingBuses = true);
     try {
       // Yakın durak ID'sini bul
       final stops = _catalog?.stops ?? const <KentkartStop>[];
       String? stopId;
       double best = double.infinity;
       for (final s in stops) {
-        final d = const Distance().as(LengthUnit.Meter, ref, LatLng(s.lat, s.lng));
+        final d = const Distance()
+            .as(LengthUnit.Meter, ref, LatLng(s.lat, s.lng));
         if (d < best) {
           best = d;
           stopId = s.stopId;
@@ -111,7 +119,9 @@ class _MapScreenState extends State<MapScreen> {
       );
       if (mounted) setState(() => _buses = buses);
     } catch (_) {
-      // Sessizce geç: canlı veri yoksa harita çalışmaya devam eder
+      // Hata yutulmuyor: KentkartApi hatayı KentkartHealth'e kaydeder ve
+      // ekranın üstündeki KentkartStatusBanner kullanıcıya gösterir.
+      if (mounted) setState(() => _buses = []);
     } finally {
       if (mounted) setState(() => _loadingBuses = false);
     }
@@ -153,10 +163,17 @@ class _MapScreenState extends State<MapScreen> {
         setState(() => _routeLine = lines.first);
         _fitToRoute(lines.first);
       } else {
+        // Sessiz düşüş yok: kullanıcı bunun gerçek güzergâh olmadığını bilmeli.
         setState(() => _routeLine = [
               LatLng(o.latitude, o.longitude),
               LatLng(d.latitude, d.longitude),
             ]);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Canlı güzergâh çizilemedi; iki nokta arasında düz çizgi gösteriliyor.'),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _loadingRoute = false);
@@ -208,6 +225,45 @@ class _MapScreenState extends State<MapScreen> {
           LatLng(minLat - 0.004, minLng - 0.004),
           LatLng(maxLat + 0.004, maxLng + 0.004),
         ),
+      ),
+    );
+  }
+
+  /// Durağa dokunulduğunda: hatlar + yaklaşan canlı otobüsler.
+  void _openStopDetail(KentkartStop stop) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StopDetailSheet(
+        stop: stop,
+        onSetOrigin: () {
+          Navigator.pop(ctx);
+          setState(() {
+            _origin = LatLng(stop.lat, stop.lng);
+            _originLabel = stop.name;
+            _routeLine = [];
+          });
+          _mapController.move(LatLng(stop.lat, stop.lng), 15);
+          _loadBuses();
+        },
+        onSetDestination: () {
+          Navigator.pop(ctx);
+          setState(() {
+            _destination = LatLng(stop.lat, stop.lng);
+            _destinationLabel = stop.name;
+            _routeLine = [];
+          });
+          _loadBuses();
+        },
+        onNavigate: () {
+          Navigator.pop(ctx);
+          LocationService.startNavigation(
+            destLat: stop.lat,
+            destLng: stop.lng,
+            destLabel: stop.name,
+          );
+        },
       ),
     );
   }
@@ -297,6 +353,14 @@ class _MapScreenState extends State<MapScreen> {
                             title: Text(s.name),
                             subtitle: Text(
                                 '${s.lat.toStringAsFixed(5)}, ${s.lng.toStringAsFixed(5)}'),
+                            trailing: IconButton(
+                              tooltip: 'Bu durağın hatları',
+                              icon: const Icon(Icons.list_alt, size: 18),
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                _openStopDetail(s);
+                              },
+                            ),
                             onTap: () {
                               Navigator.pop(ctx);
                               setState(() {
@@ -335,12 +399,19 @@ class _MapScreenState extends State<MapScreen> {
   @override
   Widget build(BuildContext context) {
     final buses = _buses;
+    final stops = _catalog?.stops ?? const <KentkartStop>[];
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Edirne Haritası (OpenStreetMap)'),
         backgroundColor: Colors.white,
         elevation: 0.5,
         actions: [
+          IconButton(
+            tooltip: _showStops ? 'Durak katmanını gizle' : 'Tüm durakları göster',
+            onPressed: () => setState(() => _showStops = !_showStops),
+            icon: Icon(_showStops ? Icons.location_off : Icons.location_on),
+          ),
           IconButton(
             tooltip: 'GPS konumumu al',
             onPressed: _useMyLocation,
@@ -385,6 +456,34 @@ class _MapScreenState extends State<MapScreen> {
                 ),
               MarkerLayer(
                 markers: [
+                  // 1) TÜM DURAKLAR KATMANI
+                  if (_showStops)
+                    for (final s in stops)
+                      Marker(
+                        point: LatLng(s.lat, s.lng),
+                        width: 44,
+                        height: 44,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => _openStopDetail(s),
+                          child: Tooltip(
+                            message: '${s.name}\nDokun: hatlar ve canlı otobüsler',
+                            child: Center(
+                              child: Container(
+                                width: 15,
+                                height: 15,
+                                decoration: BoxDecoration(
+                                  color: Colors.indigo.shade600,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                      color: Colors.white, width: 2),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  // 2) KALKIŞ
                   if (_origin != null)
                     Marker(
                       point: _origin!,
@@ -393,13 +492,16 @@ class _MapScreenState extends State<MapScreen> {
                       child: const Icon(Icons.trip_origin,
                           color: Colors.green, size: 36),
                     ),
+                  // 3) VARIŞ
                   if (_destination != null)
                     Marker(
                       point: _destination!,
                       width: 44,
                       height: 44,
-                      child: const Icon(Icons.place, color: Colors.red, size: 40),
+                      child:
+                          const Icon(Icons.place, color: Colors.red, size: 40),
                     ),
+                  // 4) CANLI OTOBÜSLER
                   for (final b in buses)
                     Marker(
                       point: LatLng(b.lat, b.lng),
@@ -430,6 +532,13 @@ class _MapScreenState extends State<MapScreen> {
                 ],
               ),
             ],
+          ),
+          // Canlı veri sorunlarını görünür kılan uyarı (yoksa hiç çizilmez).
+          const Positioned(
+            top: 8,
+            left: 8,
+            right: 8,
+            child: KentkartStatusBanner(),
           ),
           if (_loadingBuses)
             const Align(
@@ -473,11 +582,11 @@ class _MapScreenState extends State<MapScreen> {
             ),
         ],
       ),
-      bottomSheet: _buildSelectionBar(),
+      bottomSheet: _buildSelectionBar(stopCount: stops.length),
     );
   }
 
-  Widget _buildSelectionBar() {
+  Widget _buildSelectionBar({required int stopCount}) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
@@ -579,9 +688,17 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ],
           ),
-          if (_buses.isNotEmpty)
+          if (_showStops && stopCount > 0)
             Padding(
               padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                '📍 Haritadaki $stopCount durağa dokunarak o duraktan geçen hatları ve canlı otobüsleri görebilirsiniz.',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+              ),
+            ),
+          if (_buses.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
               child: Text(
                 '🕐 Canlı: yakınızdaki ${_buses.length} otobüs (${_buses.first.lineCode} ${_buses.first.minutesAway} dk) — 10 sn’de bir yenilenir',
                 style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
@@ -640,7 +757,8 @@ class _MapScreenState extends State<MapScreen> {
         TextButton(
           onPressed: onSearch,
           style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 4), visualDensity: VisualDensity.compact),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              visualDensity: VisualDensity.compact),
           child: const Text('Ara', style: TextStyle(fontSize: 11)),
         ),
       ],

@@ -1,7 +1,7 @@
 name: etus_mobile
 description: "Edirne ETUS Akıllı Durak, Rota ve Google Maps Asistanı"
 publish_to: "none"
-version: 1.2.0+3
+version: 1.3.0+4
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -18,6 +18,16 @@ dependencies:
   http: ^1.6.0
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
+
+# Flutter 3.24'ün Gradle eklentisi `flutter` uzantısını eklenti (library)
+# alt projelerine kaydetmiyor; bu davranış Flutter 3.27.0'da geldi.
+# geolocator_android 4.6.2 ise build.gradle'ında `compileSdk flutter.compileSdkVersion`
+# kullandığı hâlde pubspec'inde Flutter >=2.17 yazdığı için pub bu sürümü seçiyor ve
+# Android derlemesi "Could not get unknown property 'flutter'" ile kırılıyor.
+# 4.6.1 compileSdk/minSdk değerlerini sabit tuttuğundan Flutter 3.24 ile derlenebiliyor.
+# Kaldırma koşulu: Flutter SDK 3.27+ sürümüne yükseltildiğinde bu override silinebilir.
+dependency_overrides:
+  geolocator_android: 4.6.1
 
 dev_dependencies:
   flutter_test:

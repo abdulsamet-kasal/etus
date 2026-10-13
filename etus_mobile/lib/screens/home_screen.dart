@@ -5,6 +5,8 @@ import '../data/etus_data.dart';
 import '../services/smart_search_service.dart';
 import '../services/location_service.dart';
 import '../services/journey_service.dart';
+import '../services/kentkart_health.dart';
+import '../widgets/kentkart_status_banner.dart';
 import '../widgets/quick_chip.dart';
 import '../widgets/route_card.dart';
 import 'map_screen.dart';
@@ -350,6 +352,9 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // 0. CANLI VERİ SAĞLIĞI — sorun varsa görünür uyarı çıkar.
+            _buildHealthSection(),
+
             // 1. MEVCUT KONUM GÖSTERGE KARTI
             _buildLocationCard(),
 
@@ -378,6 +383,22 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  /// Canlı veri sağlığı uyarısı. Sorun yoksa hiç yer kaplamaz.
+  Widget _buildHealthSection() {
+    return ListenableBuilder(
+      listenable: KentkartHealth.instance,
+      builder: (context, _) {
+        if (KentkartHealth.instance.userMessage == null) {
+          return const SizedBox.shrink();
+        }
+        return const Padding(
+          padding: EdgeInsets.only(bottom: 12),
+          child: KentkartStatusBanner(),
+        );
+      },
     );
   }
 
