@@ -4,6 +4,7 @@ import '../models/route_line.dart';
 import '../data/etus_data.dart';
 import '../services/smart_search_service.dart';
 import '../services/location_service.dart';
+import '../services/journey_service.dart';
 import '../widgets/quick_chip.dart';
 import '../widgets/route_card.dart';
 
@@ -102,7 +103,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// ETUS Hatlarını ve Yolculuk Seçeneklerini Hesapla
+  /// ETUS Hatlarını ve Yolculuk Seçeneklerini Hesapla (doğrudan + aktarmalı)
   void _calculateJourneys() {
     if (_userLocation == null || _selectedDestination == null) return;
 
@@ -116,30 +117,15 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    final List<JourneyOption> list = [];
-
-    for (var route in EtusDatabase.routes) {
-      final subStops = route.getSubStops(originStop.id, destStop.id);
-      if (subStops != null && subStops.isNotEmpty) {
-        final stopCount = subStops.length;
-        final busDuration = (stopCount - 1) * 3;
-        final walkDuration = (_userLocation!.distanceToStopMeters / 80).ceil();
-        final totalDuration = busDuration + walkDuration + 3;
-
-        list.add(JourneyOption(
-          route: route,
-          subStopIds: subStops,
-          stopCount: stopCount,
-          busDurationMinutes: busDuration,
-          walkDurationMinutes: walkDuration,
-          totalDurationMinutes: totalDuration,
-          isForward: true,
-        ));
-      }
-    }
+    final options = JourneyService.findJourneys(
+      originPlace: originStop,
+      destinationPlace: destStop,
+      walkMeters: _userLocation!.distanceToStopMeters,
+      maxResults: 6,
+    );
 
     setState(() {
-      _journeyOptions = list;
+      _journeyOptions = options;
     });
   }
 
@@ -571,21 +557,20 @@ class _HomeScreenState extends State<HomeScreen> {
           color: Colors.amber.shade50,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: Colors.amber.shade200),
-        ),
-        child: Column(
-          children: [
-            const Icon(Icons.info_outline, color: Colors.amber, size: 32),
-            const SizedBox(height: 8),
-            const Text(
-              'Doğrudan Hat Bulunamadı',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Bulunduğunuz duraktan ${_selectedDestination!.name} durağına tek hat ile doğrudan ulaşım bulunmuyor. Saraçlar (Merkez) üzerinden aktarma yapabilirsiniz.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12),
-            ),
+        ),          child: Column(
+            children: [
+              const Icon(Icons.info_outline, color: Colors.amber, size: 32),
+              const SizedBox(height: 8),
+              const Text(
+                'Hat Bulunamadı',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${_selectedDestination!.name} için bu saatte planlanabilir bir yolculuk bulunamadı. Google Maps ile canlı toplu taşıma tarifesi görebilirsiniz.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12),
+              ),
             const SizedBox(height: 12),
             ElevatedButton.icon(
               onPressed: () {
@@ -612,13 +597,15 @@ class _HomeScreenState extends State<HomeScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              'BİNEBİLECEĞİNİZ ETUS OTOBÜSLERİ (${_journeyOptions.length})',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.8,
-                color: Colors.grey.shade600,
+            Expanded(
+              child: Text(
+                'YOLCULUK ÖNERİLERİ (${_journeyOptions.length})',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.8,
+                  color: Colors.grey.shade600,
+                ),
               ),
             ),
             Container(
@@ -629,7 +616,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 border: Border.all(color: Colors.green.shade200),
               ),
               child: Text(
-                'Aktarmasız',
+                '${_journeyOptions.where((j) => j.isDirect).length} doğrudan • ${_journeyOptions.where((j) => !j.isDirect).length} aktarmalı',
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
