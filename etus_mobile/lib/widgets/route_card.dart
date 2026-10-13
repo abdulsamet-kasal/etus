@@ -175,19 +175,18 @@ class _RouteCardState extends State<RouteCard> {
                   ),
                 const SizedBox(height: 14),
 
-                // GOOGLE MAPS AKSİYON BUTONU
+                // CANLI NAVİGASYON BUTONU — doğrudan sürüş/navigasyon modunda başlar
                 ElevatedButton.icon(
                   onPressed: () {
-                    LocationService.launchGoogleMapsTransit(
-                      originLat: widget.userLat,
-                      originLng: widget.userLng,
+                    LocationService.startNavigation(
                       destLat: widget.destinationStop.latitude,
                       destLng: widget.destinationStop.longitude,
+                      destLabel: widget.destinationStop.name,
                     );
                   },
                   icon: const Icon(Icons.navigation, color: Colors.red, size: 18),
                   label: const Text(
-                    'Google Haritalar\'da Canlı Başlat',
+                    'Canlı Navigasyonu Başlat',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 13,
@@ -199,6 +198,31 @@ class _RouteCardState extends State<RouteCard> {
                     foregroundColor: Colors.black87,
                     elevation: 2,
                     minimumSize: const Size.fromHeight(44),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Toplu taşıma alternatifi
+                OutlinedButton.icon(
+                  onPressed: () {
+                    LocationService.launchGoogleMapsTransit(
+                      originLat: widget.userLat,
+                      originLng: widget.userLng,
+                      destLat: widget.destinationStop.latitude,
+                      destLng: widget.destinationStop.longitude,
+                    );
+                  },
+                  icon: const Icon(Icons.directions_transit, size: 16),
+                  label: const Text(
+                    'Google Maps ile Toplu Taşıma',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(40),
+                    foregroundColor: Colors.white,
+                    side: BorderSide(color: Colors.white.withOpacity(0.7)),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),

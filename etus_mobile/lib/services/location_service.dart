@@ -97,14 +97,13 @@ class LocationService {
     );
   }
 
-  /// Google Maps Toplu Taşıma Navigasyonunu Başlat
+  /// Google Maps Toplu Taşıma Yol Tarifini Aç (seçim ekranı)
   static Future<bool> launchGoogleMapsTransit({
     required double originLat,
     required double originLng,
     required double destLat,
     required double destLng,
   }) async {
-    // Google Haritalar Canlı Transit (Toplu Taşıma) Yol Tarifi URL'i
     final Uri url = Uri.parse(
       'https://www.google.com/maps/dir/?api=1&origin=$originLat,$originLng&destination=$destLat,$destLng&travelmode=transit',
     );
@@ -114,5 +113,43 @@ class LocationService {
     } else {
       return false;
     }
+  }
+
+  /// Canlı navigasyonu **doğrudan başlatır** (yol tarifi ekranı değil, sürüş modu).
+  ///
+  /// Öncelik sırası:
+  /// 1. `google.navigation:q=` → Google Maps anında turn-by-turn navigasyon açar
+  /// 2. `https://www.google.com/maps/dir/?...&dir_action=navigate` → web fallback
+  /// 3. `geo:` → cihazdaki varsayılan harita uygulaması
+  static Future<bool> startNavigation({
+    required double destLat,
+    required double destLng,
+    String? destLabel,
+    String travelMode = 'd', // d=driving, w=walking, t=transit
+  }) async {
+    final coord = '$destLat,$destLng';
+    final label = destLabel ?? '';
+
+    final candidates = <Uri>[
+      // 1) Google Maps native navigasyon — harita anında canlı konumla başlar
+      Uri.parse('google.navigation:q=$coord&mode=$travelMode'),
+      // 2) Web fallback — dir_action=navigate ile doğrudan navigasyon başlatır
+      Uri.parse(
+          'https://www.google.com/maps/dir/?api=1&destination=$coord&destination_place_id=&dir_action=navigate&travelmode=$travelMode'),
+      // 3) Genel geo: intenti (OsmAnd, Apple Haritalar vb.)
+      Uri.parse('geo:$coord?q=$coord(${Uri.encodeComponent(label)})'),
+    ];
+
+    for (final url in candidates) {
+      try {
+        if (await canLaunchUrl(url)) {
+          final ok = await launchUrl(url, mode: LaunchMode.externalApplication);
+          if (ok) return true;
+        }
+      } catch (_) {
+        // sıradaki adaya geç
+      }
+    }
+    return false;
   }
 }

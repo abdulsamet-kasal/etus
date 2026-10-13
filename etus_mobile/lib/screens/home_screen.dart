@@ -7,6 +7,7 @@ import '../services/location_service.dart';
 import '../services/journey_service.dart';
 import '../widgets/quick_chip.dart';
 import '../widgets/route_card.dart';
+import 'map_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -24,6 +25,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Stop? _selectedDestination;
   String? _selectedMatchReason;
   List<JourneyOption> _journeyOptions = [];
+
+  /// Elle seçilen kalkış (GPS yerine kullanıcı başka durak seçebilir)
+  Stop? _customOrigin;
 
   @override
   void initState() {
@@ -103,11 +107,16 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Kalkış noktasını belirle (GPS veya elle seçilen durak)
+  Stop get _originStop =>
+      _customOrigin ?? _userLocation?.nearestStop ?? EtusDatabase.stops.values.first;
+
   /// ETUS Hatlarını ve Yolculuk Seçeneklerini Hesapla (doğrudan + aktarmalı)
   void _calculateJourneys() {
-    if (_userLocation == null || _selectedDestination == null) return;
+    if (_selectedDestination == null) return;
+    if (_userLocation == null && _customOrigin == null) return;
 
-    final originStop = _userLocation!.nearestStop;
+    final originStop = _originStop;
     final destStop = _selectedDestination!;
 
     if (originStop.id == destStop.id) {
@@ -117,16 +126,118 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    // Yürüme mesafesi: GPS varsa GPS→kalkış, yoksa 0 (kullanıcı zaten durakta)
+    int walkMeters;
+    if (_customOrigin != null) {
+      if (_userLocation != null) {
+        walkMeters = originStop.distanceTo(
+            _userLocation!.latitude, _userLocation!.longitude);
+      } else {
+        walkMeters = 0;
+      }
+    } else {
+      walkMeters = _userLocation!.distanceToStopMeters;
+    }
+
     final options = JourneyService.findJourneys(
       originPlace: originStop,
       destinationPlace: destStop,
-      walkMeters: _userLocation!.distanceToStopMeters,
+      walkMeters: walkMeters,
       maxResults: 6,
     );
 
     setState(() {
       _journeyOptions = options;
     });
+  }
+
+  /// Kalkış durağını elle seç (GPS yerine)
+  void _openOriginPicker() {
+    final controller = TextEditingController();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: StatefulBuilder(
+            builder: (ctx, setSheetState) {
+              final q = controller.text.trim();
+              final results = q.isEmpty
+                  ? EtusDatabase.stops.values
+                      .take(30)
+                      .map((s) => SmartSearchResult(
+                          stop: s,
+                          score: 0,
+                          matchedReason: 'Durak'))
+                      .toList()
+                  : SmartSearchService.search(q);
+              return SizedBox(
+                height: 520,
+                child: Column(
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 12),
+                      child: Text('Kalkış Noktası Seç',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 16)),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: TextField(
+                        controller: controller,
+                        autofocus: true,
+                        onChanged: (_) => setSheetState(() {}),
+                        decoration: InputDecoration(
+                          hintText: 'Kalkış durağı ara (örn: sarayiçi)...',
+                          prefixIcon: const Icon(Icons.search),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.my_location, color: Colors.green),
+                      title: const Text('GPS konumum (otomatik)',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text(_userLocation?.label ?? 'Konum alınıyor...'),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        setState(() => _customOrigin = null);
+                        _calculateJourneys();
+                      },
+                    ),
+                    const Divider(),
+                    Expanded(
+                      child: ListView(
+                        children: results.take(25).map((r) {
+                          return ListTile(
+                            leading: const Icon(Icons.trip_origin,
+                                color: Colors.green),
+                            title: Text(r.stop.name,
+                                style: const TextStyle(fontSize: 13)),
+                            subtitle: Text(r.matchedReason,
+                                style: const TextStyle(fontSize: 11)),
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              setState(() => _customOrigin = r.stop);
+                              _calculateJourneys();
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -188,6 +299,21 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         actions: [
           IconButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => MapScreen(
+                    initialLat: _userLocation?.latitude,
+                    initialLng: _userLocation?.longitude,
+                  ),
+                ),
+              );
+            },
+            icon: Icon(Icons.map, color: Colors.blue.shade700),
+            tooltip: 'Haritayı Aç (OpenStreetMap)',
+          ),
+          IconButton(
             onPressed: _isLoadingLocation ? null : _fetchLocation,
             icon: _isLoadingLocation
                 ? const SizedBox(
@@ -200,6 +326,25 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
+      floatingActionButton: _selectedDestination == null
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => MapScreen(
+                      initialLat: _userLocation?.latitude,
+                      initialLng: _userLocation?.longitude,
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.map),
+              label: const Text('Haritada Gör'),
+              backgroundColor: Colors.blue.shade700,
+              foregroundColor: Colors.white,
+            ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -236,16 +381,19 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// Mevcut Konum Kartı
+  /// Mevcut Konum Kartı (kalkış noktası — elle değiştirilebilir)
   Widget _buildLocationCard() {
     final loc = _userLocation;
+    final origin = _originStop;
+    final isCustom = _customOrigin != null;
 
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(
+            color: isCustom ? Colors.green.shade300 : Colors.grey.shade200),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.02),
@@ -261,7 +409,7 @@ class _HomeScreenState extends State<HomeScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'MEVCUT KONUMUNUZ',
+                'KALKIŞ NOKTANIZ',
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
@@ -269,21 +417,30 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: Colors.grey.shade500,
                 ),
               ),
-              if (_isLoadingLocation)
-                Text(
-                  'GPS alınıyor...',
-                  style: TextStyle(fontSize: 11, color: Colors.blue.shade700),
+              TextButton.icon(
+                onPressed: _openOriginPicker,
+                icon: const Icon(Icons.edit_location_alt, size: 14),
+                label: Text(isCustom ? 'Değiştir' : 'GPS • Değiştir'),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  visualDensity: VisualDensity.compact,
+                  foregroundColor: Colors.blue.shade700,
                 ),
+              ),
             ],
           ),
           const SizedBox(height: 4),
           Row(
             children: [
-              Icon(Icons.location_on, size: 16, color: Colors.blue.shade700),
+              Icon(isCustom ? Icons.trip_origin : Icons.location_on,
+                  size: 16,
+                  color: isCustom ? Colors.green.shade700 : Colors.blue.shade700),
               const SizedBox(width: 4),
               Expanded(
                 child: Text(
-                  loc?.label ?? 'Konum belirleniyor...',
+                  isCustom
+                      ? origin.name
+                      : (loc?.label ?? 'Konum belirleniyor...'),
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.bold,
@@ -293,48 +450,52 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ),
-          if (loc != null) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.green.shade50,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.green.shade200),
-              ),
-              child: Row(
-                children: [
-                  const Text('🚶 En yakın durak: ', style: TextStyle(fontSize: 11, color: Colors.black87)),
-                  Expanded(
-                    child: Text(
-                      loc.nearestStop.name,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green.shade800,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                    decoration: BoxDecoration(
-                      color: Colors.green.shade200,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      '${loc.distanceToStopMeters}m',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green.shade900,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.green.shade50,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.green.shade200),
             ),
-          ],
+            child: Row(
+              children: [
+                const Text('🚶 Biniş durağı: ',
+                    style: TextStyle(fontSize: 11, color: Colors.black87)),
+                Expanded(
+                  child: Text(
+                    origin.name,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green.shade800,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade200,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    isCustom
+                        ? (loc != null
+                            ? '${origin.distanceTo(loc.latitude, loc.longitude)}m'
+                            : 'seçili')
+                        : '${loc?.distanceToStopMeters ?? 0}m',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green.shade900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -630,10 +791,10 @@ class _HomeScreenState extends State<HomeScreen> {
         ..._journeyOptions.map((journey) {
           return RouteCard(
             journey: journey,
-            originStop: _userLocation!.nearestStop,
+            originStop: _originStop,
             destinationStop: _selectedDestination!,
-            userLat: _userLocation!.latitude,
-            userLng: _userLocation!.longitude,
+            userLat: _userLocation?.latitude ?? _originStop.latitude,
+            userLng: _userLocation?.longitude ?? _originStop.longitude,
           );
         }),
       ],
