@@ -1,0 +1,41 @@
+# Flutter & Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+.pub-cache/
+.pub/
+etus_mobile/.dart_tool/
+etus_mobile/.packages
+etus_mobile/build/
+etus_mobile/.flutter-plugins
+etus_mobile/.flutter-plugins-dependencies
+
+# Android
+etus_mobile/android/.gradle
+etus_mobile/android/local.properties
+etus_mobile/android/**/build/
+
+# iOS
+etus_mobile/ios/.symlinks/
+etus_mobile/ios/Pods/
+etus_mobile/ios/Podfile.lock
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE & Editörler
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Geçici ve log dosyaları
+*.log
+*.tmp
