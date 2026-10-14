@@ -11,16 +11,13 @@ import '../services/location_service.dart';
 import '../widgets/kentkart_status_banner.dart';
 import '../widgets/stop_detail_sheet.dart';
 
-/// Uygulama içi OpenStreetMap haritası:
-/// - OSM döşemeleri (API anahtarı gerektirmez)
-/// - Kentkart **tüm durak** katmanı (~390 durak: her hattın pathInfo
-///   `busStopList` birleşimi; katalogdaki 50 durak yalnızca başlangıçtır)
-/// - Kent genelindeki **tüm canlı araçlar** (her hattın pathInfo `busList`
-///   birleşimi, 20 sn'de bir hafif `010000` kipiyle yenilenir)
-/// - Hat bazında görünürlük filtresi + tek araç gizleme
-/// - Gerçek yer araması (Nominatim): rastgele adres/sokak yazılabilir;
-///   sahte eşleşme üretilmez, sonuç haritada işaretlenir
-/// - Keyfî noktaya otobüs+yürüme planı (direkt / aktarmalı + yürüme m/dk)
+/// Edirne toplu ulaşım haritası — sade tasarım.
+///
+/// - Üstte tek arama kartı (kalkış / varış + değiştir)
+/// - Altta iki düğme: Otobüs Bul + Git
+/// - Kent genelindeki tüm canlı araçlar (20 sn yenileme, hat filtresi)
+/// - Tüm duraklar (~390), gerçek yer araması (Photon + Nominatim)
+/// - Keyfî noktaya otobüs+yürüme önerisi
 class MapScreen extends StatefulWidget {
   final double? initialLat;
   final double? initialLng;
@@ -126,8 +123,6 @@ class _MapScreenState extends State<MapScreen> {
     await _loadCatalog();
     _startBusTimer();
     if (_origin != null && _destination != null) {
-      // Katalog geldikten sonra plan yapılır; duraklar geç gelse de
-      // _planJourney güncel listeyle tekrar çalışabilir.
       await _planJourney();
     }
   }
@@ -150,7 +145,6 @@ class _MapScreenState extends State<MapScreen> {
           _origin = const LatLng(41.6752, 26.5548);
         }
       });
-      // Tüm durak ağı arka planda genişletilir (46 hafif istek).
       _loadAllStops();
     } catch (e) {
       if (!mounted) return;
@@ -169,7 +163,6 @@ class _MapScreenState extends State<MapScreen> {
       final stops = await KentkartApi.fetchAllStops(lineCodes: codes);
       if (!mounted) return;
       if (stops.isNotEmpty) {
-        // Katalogdaki 50 durağı koru, yeni gelenleri stopId ile birleştir.
         final merged = <String, KentkartStop>{
           for (final s in _catalog!.stops) s.stopId: s
         };
@@ -192,7 +185,7 @@ class _MapScreenState extends State<MapScreen> {
         setState(() => _allStops = list);
       }
     } catch (_) {
-      // Katalog duraklarıyla devam; sessiz düşüş yok — banner zaten gösterir.
+      // Katalog duraklarıyla devam; banner hatayı gösterir.
     } finally {
       if (mounted) setState(() => _loadingStops = false);
     }
@@ -238,8 +231,6 @@ class _MapScreenState extends State<MapScreen> {
       if (!mounted) return;
       setState(() => _journey = plan);
 
-      // Güzergâh çizgisi: ilk direkt hattın gerçek polyline'ı, yoksa ilk
-      // aktarma hattı. Yön sırası (biniş→iniş) path durak sırasıyla doğrulanır.
       _routeLine = [];
       _routeLine2 = [];
       _walkToBoard = [o];
@@ -285,10 +276,7 @@ class _MapScreenState extends State<MapScreen> {
       if (!mounted) return;
       if (_routeLine.isEmpty && _routeLine2.isEmpty) {
         if (plan.hasOption) {
-          // Hat bulundu ama polyline çekilemedi: yürüyüş kolları + bilgi.
-          setState(() {
-            _routeLine = [o, d];
-          });
+          setState(() => _routeLine = [o, d]);
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
@@ -327,7 +315,6 @@ class _MapScreenState extends State<MapScreen> {
         return path.points;
       }
     }
-    // Sıra tutmazsa ilk bulunabilen yönün çizgisi yine gösterilir.
     for (var dir = 0; dir <= 1; dir++) {
       final path = _pathCache['$code-$dir'];
       if (path != null && path.points.length >= 2) return path.points;
@@ -364,12 +351,10 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Color _colorOf(String? hex) {
-    final clean =
-        (hex != null && hex.length == 6) ? hex : '1D4ED8';
+    final clean = (hex != null && hex.length == 6) ? hex : '1D4ED8';
     return Color(int.parse('FF$clean', radix: 16));
   }
 
-  /// Durağa dokunulduğunda: hatlar + yaklaşan canlı otobüsler.
   void _openStopDetail(KentkartStop stop) {
     showModalBottomSheet(
       context: context,
@@ -382,9 +367,7 @@ class _MapScreenState extends State<MapScreen> {
           setState(() {
             _origin = LatLng(stop.lat, stop.lng);
             _originLabel = stop.name;
-            _routeLine = [];
-            _routeLine2 = [];
-            _journey = null;
+            _clearRoute();
           });
           _mapController.move(LatLng(stop.lat, stop.lng), 15);
         },
@@ -393,9 +376,7 @@ class _MapScreenState extends State<MapScreen> {
           setState(() {
             _destination = LatLng(stop.lat, stop.lng);
             _destinationLabel = stop.name;
-            _routeLine = [];
-            _routeLine2 = [];
-            _journey = null;
+            _clearRoute();
           });
           _planJourney();
         },
@@ -411,259 +392,286 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  /// Canlı araca dokunulduğunda: bilgi + gizleme seçenekleri.
+  void _clearRoute() {
+    _routeLine = [];
+    _routeLine2 = [];
+    _walkToBoard = [];
+    _walkFromAlight = [];
+    _journey = null;
+  }
+
   void _openBusDetail(KentkartLiveBus bus) {
+    final lineHidden = _hiddenLines.contains(bus.lineCode);
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (ctx) {
-        final lineHidden = _hiddenLines.contains(bus.lineCode);
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: _colorOf(bus.colorHex),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      bus.lineCode,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w900),
-                    ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                _lineBadge(bus.lineCode, size: 15),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    bus.headSign.isEmpty ? 'Canlı araç' : bus.headSign,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 15),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      bus.headSign.isEmpty ? 'Canlı araç' : bus.headSign,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Plaka: ${bus.plate.isEmpty ? '—' : bus.plate}'
+              '${bus.minutesAway > 0 ? '  •  ${bus.minutesAway} dk' : ''}'
+              '${bus.stopsAway > 0 ? '  •  ${bus.stopsAway} durak' : ''}',
+              style:
+                  TextStyle(fontSize: 13, color: Colors.grey.shade700),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      setState(() => _hiddenBuses.add(bus.busId));
+                    },
+                    icon: const Icon(Icons.visibility_off, size: 17),
+                    label: const Text('Aracı gizle'),
+                    style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(46)),
                   ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Plaka: ${bus.plate.isEmpty ? '—' : bus.plate}'
-                '${bus.minutesAway > 0 ? ' • ${bus.minutesAway} dk' : ''}'
-                '${bus.stopsAway > 0 ? ' • ${bus.stopsAway} durak' : ''}',
-                style:
-                    TextStyle(fontSize: 12, color: Colors.grey.shade700),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        setState(() => _hiddenBuses.add(bus.busId));
-                      },
-                      icon: const Icon(Icons.visibility_off, size: 16),
-                      label: const Text('Bu aracı gizle'),
-                    ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      setState(() {
+                        if (lineHidden) {
+                          _hiddenLines.remove(bus.lineCode);
+                        } else {
+                          _hiddenLines.add(bus.lineCode);
+                        }
+                      });
+                    },
+                    icon: Icon(lineHidden
+                        ? Icons.visibility
+                        : Icons.visibility_off),
+                    label: Text(lineHidden ? 'Hattı göster' : 'Hattı gizle'),
+                    style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(46)),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        setState(() {
-                          if (lineHidden) {
-                            _hiddenLines.remove(bus.lineCode);
-                          } else {
-                            _hiddenLines.add(bus.lineCode);
-                          }
-                        });
-                      },
-                      icon: Icon(lineHidden
-                          ? Icons.visibility
-                          : Icons.visibility_off),
-                      label: Text(lineHidden
-                          ? '${bus.lineCode} göster'
-                          : '${bus.lineCode} gizle'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  /// Hat görünürlük filtresi: tek tek hat seçimi.
+  /// Hat görünürlük filtresi — hat içinde arama + tek tek seçim.
   void _openBusFilter() {
     final codes = _routeColors.keys.toList()..sort();
     final counts = _busCounts;
+    final query = TextEditingController();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setSheetState) {
-            void toggle(String code) {
-              setState(() {
-                if (_hiddenLines.contains(code)) {
-                  _hiddenLines.remove(code);
-                } else {
-                  _hiddenLines.add(code);
-                }
-              });
-              setSheetState(() {});
-            }
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          final q = query.text.trim().toLowerCase();
+          final shown = q.isEmpty
+              ? codes
+              : codes.where((c) => c.toLowerCase().contains(q)).toList();
+          void toggle(String code) {
+            setState(() {
+              if (_hiddenLines.contains(code)) {
+                _hiddenLines.remove(code);
+              } else {
+                _hiddenLines.add(code);
+              }
+            });
+            setSheetState(() {});
+          }
 
-            return SizedBox(
-              height: 560,
-              child: Column(
-                children: [
-                  const Padding(
-                    padding: EdgeInsets.only(top: 12),
-                    child: Text('Hangi araçlar görünsün?',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 16)),
+          return SizedBox(
+            height: 600,
+            child: Column(
+              children: [
+                const SizedBox(height: 12),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
-                    child: Text(
-                      '${_visibleBuses.length}/${_allBuses.length} araç görünüyor'
-                      '${_hiddenBuses.isNotEmpty ? ' • ${_hiddenBuses.length} tekil araç gizli' : ''}',
-                      style: TextStyle(
-                          fontSize: 12, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '${_visibleBuses.length}/${_allBuses.length} araç görünüyor',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+                if (_hiddenBuses.isNotEmpty)
+                  TextButton.icon(
+                    onPressed: () {
+                      setState(() => _hiddenBuses.clear());
+                      setSheetState(() {});
+                    },
+                    icon: const Icon(Icons.refresh, size: 16),
+                    label: Text(
+                        '${_hiddenBuses.length} gizli aracı geri getir'),
+                  ),
+                Padding(
+                  padding:
+                      const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                  child: TextField(
+                    controller: query,
+                    onChanged: (_) => setSheetState(() {}),
+                    decoration: InputDecoration(
+                      hintText: 'Hat ara (örn: 1A)',
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () {
-                              setState(() {
-                                _hiddenLines.clear();
-                                _hiddenBuses.clear();
-                              });
-                              setSheetState(() {});
-                            },
-                            child: const Text('Tümünü göster'),
-                          ),
+                ),
+                Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () {
+                            setState(() {
+                              _hiddenLines.clear();
+                              _hiddenBuses.clear();
+                            });
+                            setSheetState(() {});
+                          },
+                          child: const Text('Tümünü göster'),
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () {
-                              setState(() => _hiddenLines.addAll(codes));
-                              setSheetState(() {});
-                            },
-                            child: const Text('Tümünü gizle'),
-                          ),
+                      ),
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () {
+                            setState(
+                                () => _hiddenLines.addAll(codes));
+                            setSheetState(() {});
+                          },
+                          child: const Text('Tümünü gizle'),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                  if (_hiddenBuses.isNotEmpty)
-                    TextButton.icon(
-                      onPressed: () {
-                        setState(() => _hiddenBuses.clear());
-                        setSheetState(() {});
-                      },
-                      icon: const Icon(Icons.refresh, size: 16),
-                      label: const Text(
-                          'Gizli tekil araçları temizle'),
-                    ),
-                  const Divider(height: 8),
-                  Expanded(
-                    child: ListView(
-                      children: codes.map((code) {
-                        final hidden =
-                            _hiddenLines.contains(code);
-                        final n = counts[code] ?? 0;
-                        return SwitchListTile(
-                          value: !hidden,
-                          onChanged: (_) => toggle(code),
-                          secondary: Container(
-                            width: 40,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: _colorOf(_routeColors[code]),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              code,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w900,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                          title: Text(
-                            n > 0
-                                ? '$n araç seferde'
-                                : 'şu an seferde araç yok',
-                            style: const TextStyle(fontSize: 13),
-                          ),
-                        );
-                      }).toList(),
-                    ),
+                ),
+                const Divider(height: 8),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: shown.length,
+                    itemBuilder: (ctx, i) {
+                      final code = shown[i];
+                      final hidden =
+                          _hiddenLines.contains(code);
+                      final n = counts[code] ?? 0;
+                      return SwitchListTile(
+                        value: !hidden,
+                        onChanged: (_) => toggle(code),
+                        secondary: _lineBadge(code, size: 13),
+                        title: Text(
+                          n > 0 ? '$n araç seferde' : 'Seferde araç yok',
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      );
+                    },
                   ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _lineBadge(String code, {double size = 12}) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 44),
+      padding:
+          const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: _colorOf(_routeColors[code]),
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Text(
+        code,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+          fontSize: size,
+        ),
+      ),
     );
   }
 
   void _onMapTap(TapPosition tap, LatLng point) {
     if (_pickMode == _PickMode.none) return;
+    final isOrigin = _pickMode == _PickMode.origin;
     setState(() {
-      if (_pickMode == _PickMode.origin) {
+      if (isOrigin) {
         _origin = point;
-        _originLabel = 'Seçilen kalkış';
+        _originLabel = 'Seçilen konum...';
       } else {
         _destination = point;
-        _destinationLabel = 'Seçilen varış';
+        _destinationLabel = 'Seçilen konum...';
       }
       _pickMode = _PickMode.none;
-      _routeLine = [];
-      _routeLine2 = [];
-      _journey = null;
+      _clearRoute();
     });
-    if (_destination != null) _planJourney();
+    // Dokunulan noktanın gerçek adresi arka planda gelir.
+    GeocodingService.reverse(point.latitude, point.longitude)
+        .then((name) {
+      if (!mounted || name == null) return;
+      setState(() {
+        if (isOrigin) {
+          if (_origin == point) _originLabel = name;
+        } else {
+          if (_destination == point) _destinationLabel = name;
+        }
+      });
+    });
+    if (_origin != null && _destination != null) _planJourney();
   }
 
   Future<void> _useMyLocation() async {
     final loc = await LocationService.getCurrentLocation();
+    if (!mounted) return;
     setState(() {
       _origin = LatLng(loc.latitude, loc.longitude);
-      _originLabel = 'GPS konumunuz';
-      _routeLine = [];
-      _routeLine2 = [];
-      _journey = null;
+      _originLabel = 'Konumum';
+      _clearRoute();
     });
     _mapController.move(_origin!, 15);
   }
 
-  /// Durak + gerçek yer (Nominatim) araması. Sahte eşleşme üretilmez:
-  /// durak bulunamazsa OSM sonuçları gösterilir, o da yoksa boş liste.
+  /// Durak + gerçek yer araması (Photon + Nominatim, debounce'lu).
   void _searchPlace({required bool isOrigin}) {
     final stops = _stops;
     if (stops.isEmpty) {
@@ -677,13 +685,12 @@ class _MapScreenState extends State<MapScreen> {
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) {
         var osmResults = <GeocodedPlace>[];
         var osmLoading = false;
         String? osmError;
-        var osmSearched = false;
         Timer? debounce;
 
         Future<void> doOsmSearch(
@@ -696,15 +703,10 @@ class _MapScreenState extends State<MapScreen> {
           });
           try {
             final res = await GeocodingService.search(q);
-            setSheetState(() {
-              osmResults = res;
-              osmSearched = true;
-            });
+            setSheetState(() => osmResults = res);
           } catch (e) {
-            setSheetState(() {
-              osmError = 'Yer araması başarısız: $e';
-              osmSearched = true;
-            });
+            setSheetState(
+                () => osmError = 'Yer araması başarısız, tekrar deneyin.');
           } finally {
             setSheetState(() => osmLoading = false);
           }
@@ -718,18 +720,29 @@ class _MapScreenState extends State<MapScreen> {
             builder: (ctx, setSheetState) {
               final q = controller.text.trim().toLowerCase();
               final local = q.isEmpty
-                  ? stops.take(30)
+                  ? stops.take(20)
                   : stops
                       .where((s) =>
                           s.name.toLowerCase().contains(q) ||
-                          s.stopId.contains(q))
-                      .take(15);
+                          s.stopId.contains(q) ||
+                          s.routes.any((r) =>
+                              r.toLowerCase().contains(q)))
+                      .take(12);
               return SizedBox(
-                height: 560,
+                height: 600,
                 child: Column(
                   children: [
+                    const SizedBox(height: 12),
+                    Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
                     Padding(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(14),
                       child: TextField(
                         controller: controller,
                         autofocus: true,
@@ -737,15 +750,15 @@ class _MapScreenState extends State<MapScreen> {
                           setSheetState(() {});
                           debounce?.cancel();
                           debounce = Timer(
-                              const Duration(milliseconds: 700),
+                              const Duration(milliseconds: 600),
                               () => doOsmSearch(setSheetState));
                         },
                         onSubmitted: (_) =>
                             doOsmSearch(setSheetState),
                         decoration: InputDecoration(
                           hintText: isOrigin
-                              ? 'Kalkış ara: durak veya adres...'
-                              : 'Varış ara: durak veya adres...',
+                              ? 'Nereden? Durak veya adres yazın'
+                              : 'Nereye? Durak veya adres yazın',
                           prefixIcon: const Icon(Icons.search),
                           suffixIcon: osmLoading
                               ? const Padding(
@@ -753,18 +766,14 @@ class _MapScreenState extends State<MapScreen> {
                                   child: SizedBox(
                                     width: 16,
                                     height: 16,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2),
+                                    child:
+                                        CircularProgressIndicator(
+                                            strokeWidth: 2),
                                   ),
                                 )
-                              : IconButton(
-                                  tooltip: 'İnternette yer ara',
-                                  icon: const Icon(Icons.travel_explore),
-                                  onPressed: () =>
-                                      doOsmSearch(setSheetState),
-                                ),
+                              : null,
                           border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(14),
                           ),
                         ),
                       ),
@@ -773,19 +782,8 @@ class _MapScreenState extends State<MapScreen> {
                       child: ListView(
                         children: [
                           if (local.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 4),
-                              child: Text(
-                                'DURAKLAR (${local.length})',
-                                style: TextStyle(
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 0.8,
-                                  color: Colors.grey.shade600,
-                                ),
-                              ),
-                            ),
+                            _sheetHeader(
+                                'DURAKLAR', Icons.directions_bus),
                           for (final s in local)
                             ListTile(
                               dense: true,
@@ -794,29 +792,21 @@ class _MapScreenState extends State<MapScreen> {
                                     ? Icons.trip_origin
                                     : Icons.place,
                                 color: isOrigin
-                                    ? Colors.green
-                                    : Colors.red,
+                                    ? Colors.green.shade700
+                                    : Colors.red.shade600,
+                                size: 20,
                               ),
                               title: Text(s.name,
-                                  style: const TextStyle(fontSize: 13)),
+                                  style: const TextStyle(
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w600)),
                               subtitle: s.routes.isEmpty
                                   ? null
-                                  : Text(
-                                      s.routes.join(' • '),
+                                  : Text(s.routes.join('  •  '),
                                       style: TextStyle(
-                                          fontSize: 11,
+                                          fontSize: 11.5,
                                           color:
-                                              Colors.grey.shade600),
-                                    ),
-                              trailing: IconButton(
-                                tooltip: 'Bu durağın hatları',
-                                icon: const Icon(Icons.list_alt,
-                                    size: 18),
-                                onPressed: () {
-                                  Navigator.pop(ctx);
-                                  _openStopDetail(s);
-                                },
-                              ),
+                                              Colors.grey.shade600)),
                               onTap: () {
                                 Navigator.pop(ctx);
                                 _setEndpoint(
@@ -826,53 +816,45 @@ class _MapScreenState extends State<MapScreen> {
                                     label: s.name);
                               },
                             ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 4),
-                            child: Text(
-                              osmSearched
-                                  ? 'HARİTA YERLERİ (${osmResults.length})'
-                                  : 'HARİTA YERLERİ (adres yazıp büyütece dokunun)',
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.8,
-                                color: Colors.grey.shade600,
-                              ),
-                            ),
-                          ),
+                          _sheetHeader('ADRES VE YERLER',
+                              Icons.travel_explore),
                           if (osmError != null)
                             Padding(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 12),
+                                  horizontal: 16),
                               child: Text(osmError!,
                                   style: const TextStyle(
-                                      fontSize: 12,
+                                      fontSize: 12.5,
                                       color: Colors.red)),
                             ),
-                          if (!osmSearched && osmResults.isEmpty)
+                          if (osmResults.isEmpty && !osmLoading)
                             const Padding(
-                              padding:
-                                  EdgeInsets.symmetric(horizontal: 12),
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 4),
                               child: Text(
-                                'Örn: "Meriç Köprüsü", "Balkan Kampüsü", "Kapıkule yolu" — ne yazarsanız haritada gerçek konumu bulunur.',
-                                style: TextStyle(fontSize: 12),
+                                'En az 3 harf yazın; Edirne içindeki adres, cadde ve önemli yerler burada listelenir.',
+                                style: TextStyle(
+                                    fontSize: 12.5,
+                                    color: Colors.grey),
                               ),
                             ),
                           for (final p in osmResults)
                             ListTile(
                               dense: true,
                               leading: const Icon(
-                                  Icons.travel_explore,
-                                  color: Colors.teal),
+                                  Icons.location_on_outlined,
+                                  color: Colors.teal,
+                                  size: 20),
                               title: Text(p.name,
-                                  style: const TextStyle(fontSize: 13)),
+                                  style: const TextStyle(
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w600)),
                               subtitle: Text(p.fullName,
                                   maxLines: 2,
                                   overflow:
                                       TextOverflow.ellipsis,
                                   style: const TextStyle(
-                                      fontSize: 11)),
+                                      fontSize: 11.5)),
                               onTap: () {
                                 Navigator.pop(ctx);
                                 _setEndpoint(
@@ -894,6 +876,28 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  Widget _sheetHeader(String text, IconData icon) {
+    return Padding(
+      padding:
+          const EdgeInsets.fromLTRB(16, 8, 16, 2),
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: Colors.grey.shade500),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1,
+              color: Colors.grey.shade500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _setEndpoint(
       {required bool isOrigin,
       required LatLng point,
@@ -906,9 +910,7 @@ class _MapScreenState extends State<MapScreen> {
         _destination = point;
         _destinationLabel = label;
       }
-      _routeLine = [];
-      _routeLine2 = [];
-      _journey = null;
+      _clearRoute();
     });
     _mapController.move(point, 15);
     if (_origin != null && _destination != null) _planJourney();
@@ -927,47 +929,28 @@ class _MapScreenState extends State<MapScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Edirne Haritası (OpenStreetMap)'),
+        title: const Text('Edirne Ulaşım',
+            style: TextStyle(fontWeight: FontWeight.w800)),
         backgroundColor: Colors.white,
         elevation: 0.5,
         actions: [
           IconButton(
-            tooltip: 'Hangi araçlar görünsün? (${buses.length})',
+            tooltip: '${buses.length} araç görünüyor — filtrele',
             onPressed: _openBusFilter,
             icon: Badge(
               label: Text('${buses.length}'),
               isLabelVisible: buses.isNotEmpty,
-              child: Icon(
-                  _hiddenLines.isEmpty && _hiddenBuses.isEmpty
-                      ? Icons.directions_bus
-                      : Icons.directions_bus_filled),
+              child: const Icon(Icons.directions_bus),
             ),
           ),
           IconButton(
-            tooltip: _showStops
-                ? 'Durak katmanını gizle'
-                : 'Tüm durakları göster',
+            tooltip:
+                _showStops ? 'Durakları gizle' : 'Durakları göster',
             onPressed: () =>
                 setState(() => _showStops = !_showStops),
-            icon: Icon(
-                _showStops ? Icons.location_off : Icons.location_on),
-          ),
-          IconButton(
-            tooltip: 'GPS konumumu al',
-            onPressed: _useMyLocation,
-            icon: const Icon(Icons.my_location),
-          ),
-          IconButton(
-            tooltip: 'Otobüs bul + güzergâh çiz',
-            onPressed: _loadingRoute ? null : _planJourney,
-            icon: _loadingRoute
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child:
-                        CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.route),
+            icon: Icon(_showStops
+                ? Icons.layers
+                : Icons.layers_outlined),
           ),
         ],
       ),
@@ -1013,7 +996,7 @@ class _MapScreenState extends State<MapScreen> {
                     Polyline(
                       points: _walkToBoard,
                       strokeWidth: 3,
-                      color: Colors.grey.shade600,
+                      color: Colors.grey.shade500,
                     ),
                   ],
                 ),
@@ -1023,13 +1006,12 @@ class _MapScreenState extends State<MapScreen> {
                     Polyline(
                       points: _walkFromAlight,
                       strokeWidth: 3,
-                      color: Colors.grey.shade600,
+                      color: Colors.grey.shade500,
                     ),
                   ],
                 ),
               MarkerLayer(
                 markers: [
-                  // 1) TÜM DURAKLAR KATMANI
                   if (_showStops)
                     for (final s in stops)
                       Marker(
@@ -1044,10 +1026,10 @@ class _MapScreenState extends State<MapScreen> {
                                 '${s.name}\nDokun: hatlar ve canlı otobüsler',
                             child: Center(
                               child: Container(
-                                width: 15,
-                                height: 15,
+                                width: 14,
+                                height: 14,
                                 decoration: BoxDecoration(
-                                  color: Colors.indigo.shade600,
+                                  color: Colors.indigo.shade500,
                                   shape: BoxShape.circle,
                                   border: Border.all(
                                       color: Colors.white,
@@ -1058,25 +1040,22 @@ class _MapScreenState extends State<MapScreen> {
                           ),
                         ),
                       ),
-                  // 2) KALKIŞ
                   if (_origin != null)
                     Marker(
                       point: _origin!,
-                      width: 44,
-                      height: 44,
+                      width: 48,
+                      height: 48,
                       child: const Icon(Icons.trip_origin,
-                          color: Colors.green, size: 36),
+                          color: Colors.green, size: 38),
                     ),
-                  // 3) VARIŞ
                   if (_destination != null)
                     Marker(
                       point: _destination!,
-                      width: 44,
-                      height: 44,
+                      width: 48,
+                      height: 48,
                       child: const Icon(Icons.place,
-                          color: Colors.red, size: 40),
+                          color: Colors.red, size: 42),
                     ),
-                  // 4) CANLI OTOBÜSLER (tümü, filtreli)
                   for (final b in buses)
                     Marker(
                       point: LatLng(b.lat, b.lng),
@@ -1087,7 +1066,7 @@ class _MapScreenState extends State<MapScreen> {
                         onTap: () => _openBusDetail(b),
                         child: Tooltip(
                           message:
-                              '${b.lineCode} • ${b.headSign}\n${b.plate} • dokun: seçenekler',
+                              '${b.lineCode} • ${b.headSign}\nDokun: seçenekler',
                           child: Container(
                             decoration: BoxDecoration(
                               color: _colorOf(b.colorHex.isEmpty
@@ -1116,275 +1095,157 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ],
           ),
-          // Canlı veri sorunlarını görünür kılan uyarı (yoksa hiç çizilmez).
-          const Positioned(
-            top: 8,
-            left: 8,
-            right: 8,
-            child: KentkartStatusBanner(),
-          ),
-          if (_loadingBuses)
-            const Align(
-              alignment: Alignment.center,
-              child: Padding(
-                padding: EdgeInsets.all(8),
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ),
-            ),
-          if (_loadingCatalog)
-            const Align(
-              alignment: Alignment.topCenter,
-              child: Padding(
-                padding: EdgeInsets.all(8),
-                child: Card(
-                  child: Padding(
-                    padding: EdgeInsets.all(8),
-                    child: Text('ETUS hat/durakları yükleniyor...'),
-                  ),
-                ),
-              ),
-            ),
-          if (_loadingStops)
-            Align(
-              alignment: Alignment.topCenter,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 56),
-                child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Text(
-                        'Tüm duraklar yükleniyor (${stops.length} bulundu)...'),
-                  ),
-                ),
-              ),
-            ),
-          if (_catalogError != null)
-            Align(
-              alignment: Alignment.topCenter,
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: Card(
-                  color: Colors.orange.shade50,
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Text(_catalogError!,
-                        style:
-                            const TextStyle(fontSize: 12)),
-                  ),
-                ),
-              ),
-            ),
-          if (_journey != null)
-            Positioned(
-              left: 8,
-              right: 8,
-              bottom: 218,
-              child: _buildJourneyCard(),
-            ),
-        ],
-      ),
-      bottomSheet: _buildSelectionBar(stopCount: stops.length),
-    );
-  }
-
-  Widget _buildJourneyCard() {
-    final j = _journey!;
-    return Card(
-      elevation: 4,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 220),
-          child: SingleChildScrollView(
+          // Üst: arama kartı + durum bandı
+          Positioned(
+            top: 10,
+            left: 12,
+            right: 12,
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  children: [
-                    const Expanded(
-                      child: Text('OTOBÜS ÖNERİLERİ',
-                          style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.8)),
-                    ),
-                    IconButton(
-                      tooltip: 'Kapat',
-                      visualDensity: VisualDensity.compact,
-                      onPressed: () =>
-                          setState(() => _journey = null),
-                      icon: const Icon(Icons.close, size: 18),
-                    ),
-                  ],
-                ),
-                for (final d in j.direct.take(3))
-                  _directRow(d),
-                for (final t in j.transfer.take(2))
-                  _transferRow(t),
-                if (!j.hasOption)
-                  Text(
-                    j.destLines.isEmpty
-                        ? 'Bu noktaya 900 m içinde otobüs durağı bulunamadı.'
-                        : 'Direkt hat yok. Yakından geçenler: ${j.destLines.take(6).join(', ')} — varışa en yakın durağa yürüyüp bu hatlara binebilirsiniz.',
-                    style: const TextStyle(fontSize: 12),
+                _buildSearchCard(),
+                const SizedBox(height: 6),
+                const KentkartStatusBanner(),
+                if (_pickMode != _PickMode.none)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: _pickHint(),
+                  ),
+                if (_loadingStops)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: _pill(
+                        'Tüm duraklar yükleniyor (${stops.length})...'),
+                  ),
+                if (_catalogError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: _pill(_catalogError!,
+                        warning: true),
                   ),
               ],
             ),
           ),
+          // Sağ alt: konumum düğmesi
+          Positioned(
+            right: 12,
+            bottom: 196,
+            child: FloatingActionButton.small(
+              heroTag: 'myLoc',
+              tooltip: 'Konumuma git',
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.blue.shade700,
+              onPressed: _useMyLocation,
+              child: const Icon(Icons.my_location),
+            ),
+          ),
+          if (_journey != null)
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 128,
+              child: _buildJourneyCard(),
+            ),
+        ],
+      ),
+      bottomNavigationBar: _buildBottomBar(
+          buses: buses, stopCount: stops.length),
+    );
+  }
+
+  Widget _pill(String text, {bool warning = false}) {
+    return Container(
+      padding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: warning
+            ? Colors.orange.shade50
+            : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+            color: warning
+                ? Colors.orange.shade200
+                : Colors.grey.shade200),
+        boxShadow: const [
+          BoxShadow(
+              color: Colors.black12,
+              blurRadius: 8,
+              offset: Offset(0, 2))
+        ],
+      ),
+      child: Text(text,
+          style: const TextStyle(fontSize: 12),
+          textAlign: TextAlign.center),
+    );
+  }
+
+  Widget _pickHint() {
+    final text = _pickMode == _PickMode.origin
+        ? 'Kalkış için haritada bir noktaya dokunun'
+        : 'Varış için haritada bir noktaya dokunun';
+    return InkWell(
+      onTap: () => setState(() => _pickMode = _PickMode.none),
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.blue.shade700,
+          borderRadius: BorderRadius.circular(20),
         ),
-      ),
-    );
-  }
-
-  Widget _directRow(DirectBusOption d) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: Colors.blue.shade50,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.blue.shade200),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: _colorOf(_routeColors[d.lineCode]),
-                  borderRadius: BorderRadius.circular(7),
-                ),
-                child: Text(d.lineCode,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 12)),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  '${d.boardStop.name} → ${d.alightStop.name}',
-                  style: const TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.bold),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              Text('~${d.totalMinutes} dk',
-                  style: const TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.w800)),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '🚶 Binişe ${d.walkToBoardMeters} m (~${walkMinutes(d.walkToBoardMeters)} dk) • '
-            '🚌 ${d.rideMinutes} dk • '
-            '🚶 İnişten ${d.walkFromAlightMeters} m (~${walkMinutes(d.walkFromAlightMeters)} dk)',
-            style: TextStyle(
-                fontSize: 11, color: Colors.grey.shade800),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _transferRow(TransferBusOption t) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: Colors.amber.shade50,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.amber.shade200),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '${t.firstLine} → ${t.hubStop.name} aktarma → ${t.secondLine}',
+        child: Text('$text  •  Vazgeç',
             style: const TextStyle(
-                fontSize: 12, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '🚶 Binişe ${t.walkToBoardMeters} m • 🚌 ~${t.rideMinutes} dk • '
-            '🚶 İnişten ${t.walkFromAlightMeters} m • Toplam ~${t.totalMinutes} dk',
-            style: TextStyle(
-                fontSize: 11, color: Colors.grey.shade800),
-          ),
-        ],
+                fontSize: 12.5,
+                color: Colors.white,
+                fontWeight: FontWeight.w600)),
       ),
     );
   }
 
-  Widget _buildSelectionBar({required int stopCount}) {
+  /// Üst arama kartı: kalkış / varış satırları + değiştir.
+  Widget _buildSearchCard() {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius:
-            const BorderRadius.vertical(top: Radius.circular(18)),
-        boxShadow: [
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: const [
           BoxShadow(
-              color: Colors.black.withOpacity(0.12), blurRadius: 12),
+              color: Colors.black12,
+              blurRadius: 12,
+              offset: Offset(0, 3))
         ],
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: _endpointButton(
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _searchRow(
+                  dot: Colors.green.shade600,
                   icon: Icons.trip_origin,
-                  color: Colors.green,
-                  label: 'Kalkış',
                   value: _originLabel,
+                  hint: 'Nereden?',
                   active: _pickMode == _PickMode.origin,
                   onTap: () => setState(() {
                     _pickMode = _pickMode == _PickMode.origin
                         ? _PickMode.none
                         : _PickMode.origin;
                   }),
-                  onSearch: () => _searchPlace(isOrigin: true),
+                  onSearch: () =>
+                      _searchPlace(isOrigin: true),
                 ),
-              ),
-              IconButton(
-                tooltip: 'Yer değiştir',
-                onPressed: () => setState(() {
-                  final o = _origin;
-                  final ol = _originLabel;
-                  _origin = _destination;
-                  _originLabel = _destinationLabel.isEmpty
-                      ? 'Seçilen kalkış'
-                      : _destinationLabel;
-                  _destination = o;
-                  _destinationLabel = ol;
-                  _routeLine = [];
-                  _routeLine2 = [];
-                  _journey = null;
-                }),
-                icon: const Icon(Icons.swap_vert),
-              ),
-              Expanded(
-                child: _endpointButton(
+                Divider(
+                    height: 1,
+                    indent: 44,
+                    color: Colors.grey.shade200),
+                _searchRow(
+                  dot: Colors.red.shade600,
                   icon: Icons.place,
-                  color: Colors.red,
-                  label: 'Varış',
                   value: _destinationLabel.isEmpty
-                      ? 'Durak veya adres ara'
+                      ? ''
                       : _destinationLabel,
+                  hint: 'Nereye?',
                   active:
                       _pickMode == _PickMode.destination,
                   onTap: () => setState(() {
@@ -1396,132 +1257,386 @@ class _MapScreenState extends State<MapScreen> {
                   onSearch: () =>
                       _searchPlace(isOrigin: false),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed:
-                      (_origin != null && _destination != null && !_loadingRoute)
-                          ? _planJourney
-                          : null,
-                  icon: const Icon(Icons.route, size: 18),
-                  label: const Text('Otobüs Bul'),
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(44),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: (_origin != null && _destination != null)
-                      ? () {
-                          LocationService.startNavigation(
-                              destLat:
-                                  _destination!.latitude,
-                              destLng:
-                                  _destination!.longitude);
-                        }
-                      : null,
-                  icon:
-                      const Icon(Icons.navigation, size: 18),
-                  label: const Text('Navigasyonu Başlat'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green.shade600,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size.fromHeight(44),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          if (_showStops && stopCount > 0)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                '📍 Haritadaki $stopCount durağa dokunarak o duraktan geçen hatları ve canlı otobüsleri görebilirsiniz.',
-                style: TextStyle(
-                    fontSize: 11, color: Colors.grey.shade700),
-              ),
+              ],
             ),
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              _allBuses.isEmpty
-                  ? '🕐 Canlı araçlar yükleniyor... (20 sn’de bir yenilenir)'
-                  : '🕐 Canlı: kent genelinde ${_visibleBuses.length} araç görünüyor (toplam ${_allBuses.length}) — 20 sn’de bir yenilenir',
-              style: TextStyle(
-                  fontSize: 11, color: Colors.grey.shade600),
-            ),
+          ),
+          IconButton(
+            tooltip: 'Kalkış ile varışı değiştir',
+            onPressed: () => setState(() {
+              final o = _origin;
+              final ol = _originLabel;
+              _origin = _destination;
+              _originLabel = _destinationLabel.isEmpty
+                  ? 'Nereden?'
+                  : _destinationLabel;
+              _destination = o;
+              _destinationLabel = ol == 'Konumunuz'
+                  ? ''
+                  : ol;
+              _clearRoute();
+            }),
+            icon: const Icon(Icons.swap_vert),
           ),
         ],
       ),
     );
   }
 
-  Widget _endpointButton({
+  Widget _searchRow({
+    required Color dot,
     required IconData icon,
-    required Color color,
-    required String label,
     required String value,
+    required String hint,
     required bool active,
     required VoidCallback onTap,
     required VoidCallback onSearch,
   }) {
-    return Column(
-      children: [
-        Row(
+    final empty = value.isEmpty;
+    return InkWell(
+      onTap: onSearch,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: 12, vertical: 11),
+        decoration: BoxDecoration(
+          color:
+              active ? dot.withOpacity(0.08) : null,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
           children: [
-            Icon(icon, color: color, size: 16),
-            const SizedBox(width: 4),
-            Text(label,
+            Icon(icon, color: dot, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                empty ? hint : value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey.shade600)),
+                  fontSize: 13.5,
+                  fontWeight: empty
+                      ? FontWeight.normal
+                      : FontWeight.w600,
+                  color: empty
+                      ? Colors.grey.shade500
+                      : Colors.black87,
+                ),
+              ),
+            ),
+            InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(16),
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: Icon(
+                  Icons.touch_app,
+                  size: 17,
+                  color: active
+                      ? dot
+                      : Colors.grey.shade400,
+                ),
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 2),
-        InkWell(
-          onTap: onTap,
-          onLongPress: onSearch,
-          borderRadius: BorderRadius.circular(10),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(
-                horizontal: 8, vertical: 8),
-            decoration: BoxDecoration(
-              color: active
-                  ? color.withOpacity(0.12)
-                  : Colors.grey.shade100,
-              border: Border.all(
-                  color: active ? color : Colors.grey.shade300,
-                  width: 1.5),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              value,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+
+  Widget _buildJourneyCard() {
+    final j = _journey!;
+    return Card(
+      elevation: 5,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 8, 8, 12),
+        child: ConstrainedBox(
+          constraints:
+              const BoxConstraints(maxHeight: 230),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment:
+                  CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text('ÖNERİLEN OTOBÜSLER',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1)),
+                    ),
+                    IconButton(
+                      tooltip: 'Kapat',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () =>
+                          setState(() => _journey = null),
+                      icon: const Icon(Icons.close, size: 19),
+                    ),
+                  ],
+                ),
+                for (final d in j.direct.take(3))
+                  _directRow(d),
+                for (final t in j.transfer.take(2))
+                  _transferRow(t),
+                if (!j.hasOption)
+                  Padding(
+                    padding:
+                        const EdgeInsets.only(right: 8),
+                    child: Text(
+                      j.destLines.isEmpty
+                          ? 'Bu noktaya 900 m içinde otobüs durağı bulunamadı.'
+                          : 'Direkt hat yok. Yakından geçenler: ${j.destLines.take(6).join(', ')}',
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
+              ],
             ),
           ),
         ),
-        TextButton(
-          onPressed: onSearch,
-          style: TextButton.styleFrom(
+      ),
+    );
+  }
+
+  Widget _directRow(DirectBusOption d) {
+    return Container(
+      margin:
+          const EdgeInsets.only(bottom: 8, right: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _lineBadge(d.lineCode, size: 12),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '${d.boardStop.name} → ${d.alightStop.name}',
+                  style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.bold),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Text('~${d.totalMinutes} dk',
+                  style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          _timeline(steps: [
+            _Step(
+                'Yürü ${d.walkToBoardMeters} m',
+                walkMinutes(d.walkToBoardMeters)),
+            _Step(
+                'Otobüs ${d.lineCode}', d.rideMinutes),
+            _Step(
+                'Yürü ${d.walkFromAlightMeters} m',
+                walkMinutes(d.walkFromAlightMeters)),
+          ]),
+        ],
+      ),
+    );
+  }
+
+  Widget _transferRow(TransferBusOption t) {
+    return Container(
+      margin:
+          const EdgeInsets.only(bottom: 8, right: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.amber.shade50,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _lineBadge(t.firstLine, size: 11),
+              const Padding(
+                padding:
+                    EdgeInsets.symmetric(horizontal: 4),
+                child: Icon(Icons.arrow_forward,
+                    size: 14),
+              ),
+              _lineBadge(t.secondLine, size: 11),
+              const Spacer(),
+              Text('~${t.totalMinutes} dk',
+                  style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${t.boardStop.name} → ${t.hubStop.name} aktarma → ${t.alightStop.name}',
+            style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 6),
+          _timeline(steps: [
+            _Step('Yürü ${t.walkToBoardMeters} m',
+                walkMinutes(t.walkToBoardMeters)),
+            _Step('Otobüs', t.rideMinutes),
+            _Step(
+                'Yürü ${t.walkFromAlightMeters} m',
+                walkMinutes(t.walkFromAlightMeters)),
+          ]),
+        ],
+      ),
+    );
+  }
+
+  Widget _timeline({required List<_Step> steps}) {
+    return Row(
+      children: [
+        for (var i = 0; i < steps.length; i++) ...[
+          if (i > 0)
+            const Padding(
               padding:
-                  const EdgeInsets.symmetric(horizontal: 4),
-              visualDensity: VisualDensity.compact),
-          child: const Text('Ara', style: TextStyle(fontSize: 11)),
-        ),
+                  EdgeInsets.symmetric(horizontal: 3),
+              child: Icon(Icons.more_horiz,
+                  size: 13, color: Colors.grey),
+            ),
+          Icon(
+            i == 1
+                ? Icons.directions_bus
+                : Icons.directions_walk,
+            size: 14,
+            color: Colors.grey.shade700,
+          ),
+          const SizedBox(width: 3),
+          Flexible(
+            child: Text(
+              '${steps[i].label} (${steps[i].minutes} dk)',
+              style: TextStyle(
+                  fontSize: 11.5,
+                  color: Colors.grey.shade800),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ],
     );
   }
+
+  /// Alt eylem çubuğu: iki düğme + ince durum satırı.
+  Widget _buildBottomBar(
+      {required List<KentkartLiveBus> buses,
+      required int stopCount}) {
+    final ready =
+        _origin != null && _destination != null;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14,
+          14 + 0), // SafeArea padding ayrıca
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(22)),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.12),
+              blurRadius: 14),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: ready && !_loadingRoute
+                        ? _planJourney
+                        : null,
+                    icon: _loadingRoute
+                        ? const SizedBox(
+                            width: 17,
+                            height: 17,
+                            child:
+                                CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white),
+                          )
+                        : const Icon(Icons.route,
+                            size: 19),
+                    label: const Text('Otobüs Bul',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      minimumSize:
+                          const Size.fromHeight(48),
+                      shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(14)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: ready
+                        ? () {
+                            LocationService
+                                .startNavigation(
+                                    destLat: _destination!
+                                        .latitude,
+                                    destLng: _destination!
+                                        .longitude);
+                          }
+                        : null,
+                    icon: const Icon(Icons.navigation,
+                        size: 19),
+                    label: const Text('Git',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor:
+                          Colors.green.shade600,
+                      foregroundColor: Colors.white,
+                      minimumSize:
+                          const Size.fromHeight(48),
+                      shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(14)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _loadingCatalog
+                  ? 'Yükleniyor...'
+                  : '$stopCount durak  •  ${buses.length} canlı araç'
+                      '${_loadingBuses ? ' (güncelleniyor)' : ''}',
+              style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.grey.shade600),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Step {
+  final String label;
+  final int minutes;
+  _Step(this.label, this.minutes);
 }

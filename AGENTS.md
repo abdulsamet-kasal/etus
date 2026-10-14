@@ -61,3 +61,12 @@
 - **Doğrulama:** `flutter analyze` temiz; `flutter test` **44/44** (34 mevcut + 4 journey + 3 geocoding + 3 network; gerçek yanıt gövdeleri MockClient ile).
 - **Sürüm:** `1.4.0+5`; APK `releases/ETUS-v1.4.0.apk` olarak eklendi (22.482.642 bayt); push sonrası CI (analyze+test+build) otomatik **v1.4.0** Release oluşturur.
 - **CI yeşil, Release doğrulandı:** run `38600877371` → `Analyze & Test` 47 sn + `Build Flutter Release APK` 3 dk 51 sn, ikisi de başarılı. **GitHub Release v1.4.0** oluştu: asset `ETUS-v1.4.0.apk` (22.475.483 bayt), `gh release view v1.4.0` ile teyit edildi. Commit: `cbe5ff4` → `origin/main`.
+
+### 2026-10-14 — v1.5.0: Sade tasarım + çift kaynaklı gerçek yer arama
+- **İstek:** tüm uygulama/harita daha sade ve modern olsun (ama her özellik kalsın); bazı gerçek yerler aramada çıkmıyordu, gerçek harita entegrasyonu istendi.
+- **Arama keşfi (canlı doğrulandı):** Photon (`photon.komoot.io/api`, Edirne yanlı, `lang` parametresiz) Meriç Köprüsü/Erasta/Balkan Yerleşkesi/Otogar/Karaağaç Garı sorgularında isabetli; yanıtta `Point [lon,lat]` geometri + `name/street/district/city` alanları var.
+- **`services/geocoding_service.dart`:** **Photon birincil + Nominatim yedek** paralel sorgu, 150 m + ad benzerliğiyle tekilleme, Photon sırası korunur. `reverse(lat,lng)` eklendi (haritada dokunulan noktanın adres etiketi).
+- **Harita sadeleşmesi (`screens/map_screen.dart`):** üstte tek arama kartı (Nereden?/Nereye? + değiştir), AppBar'da yalnızca filtre + katman; GPS ve rota düğmeleri AppBar'dan alındı (konum FAB'ı + alt çubuk). Alt çubuk: **Otobüs Bul + Git** ve ince durum satırı (`N durak • M canlı araç`). Öneri kartı zaman çizelgesi biçiminde (yürü/otobüs/yürü). Filtre sayfasına hat arama kutusu eklendi. Arama sayfası bölüm başlıklı (DURAKLAR / ADRES VE YERLER), durak araması hat kodunu da kapsar. Harita dokunuşunda ters coğrafi kodlamayla gerçek adres etiketi.
+- **Test:** `map_screen_test` mock'u `pathInfo` için gerçekçi gövde döndürüyor (önceki mock şema kayması üretip uyarı bandıyla işaretçiyi kapatıyordu); `geocoding_service_test` çift kaynak + reverse kapsıyor.
+- **Doğrulama:** `flutter analyze` temiz; `flutter test` **47/47**.
+- **Sürüm:** `1.5.0+6`; APK `releases/ETUS-v1.5.0.apk`; push sonrası CI otomatik **v1.5.0** Release oluşturur.

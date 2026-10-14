@@ -40,6 +40,18 @@ const String _stopDetailBody = '''
 }
 ''';
 
+/// pathInfo her zaman `pathList` içerir (gerçek serviste olduğu gibi);
+/// boş liste sorun değil, önemli olan şema kayması üretilmemesi.
+const String _emptyPathBody = '''
+{
+  "result": {"cmd": "/web/pathInfo", "code": 0, "message": "OK"},
+  "pathList": [
+    {"headSign": "X", "displayRouteCode": "1A", "direction": "0",
+     "pointList": [], "busStopList": [], "busList": []}
+  ]
+}
+''';
+
 void main() {
   final originalClient = KentkartApi.client;
 
@@ -64,16 +76,18 @@ void main() {
     KentkartApi.client = MockClient((req) async => http.Response(
           req.url.path.endsWith('/nearest/find')
               ? _catalogBody
-              : _stopDetailBody,
+              : (req.url.path.endsWith('/pathInfo')
+                  ? _emptyPathBody
+                  : _stopDetailBody),
           200,
           headers: {'content-type': 'application/json; charset=utf-8'},
         ));
 
     await pumpMap(tester);
 
-    // Durak katmanı: katalogdan gelen durak sayısı kadar işaretçi
-    expect(find.textContaining('Haritadaki 2 durağa dokunarak'), findsOneWidget);
-    expect(find.text('Edirne Haritası (OpenStreetMap)'), findsOneWidget);
+    // Alt durum satırı: katalogdan gelen durak sayısı
+    expect(find.textContaining('2 durak'), findsOneWidget);
+    expect(find.text('Edirne Ulaşım'), findsOneWidget);
     expect(
       find.byTooltip('Gazimihal\nDokun: hatlar ve canlı otobüsler'),
       findsOneWidget,
@@ -103,7 +117,7 @@ void main() {
 
     await pumpMap(tester);
 
-    expect(find.text('Edirne Haritası (OpenStreetMap)'), findsOneWidget);
+    expect(find.text('Edirne Ulaşım'), findsOneWidget);
     expect(find.text('Canlı veri: erişilemiyor'), findsOneWidget);
     expect(
       find.textContaining('Canlı durak listesi alınamadı'),
