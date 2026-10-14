@@ -59,4 +59,5 @@
 - **`services/bus_journey_service.dart` (yeni):** keyfî iki nokta arası plan; direkt = hat kesişimi, yoksa hub üzerinden tek aktarma; varış 900 m içinde durak görmüyorsa direkt uydurulmaz, `destLines` ile "yakından geçenler" listelenir.
 - **Ana ekran (`screens/home_screen.dart`):** sahte eşleşme düzeltmesi — yerel sonuçlar 60+ skorla filtrelenir, `_executeSearch` 70+ skor ister, aksi hâlde gerçek OSM yerine haritaya yönlendirir; öneri listesinde OSM bölümü + "Haritada ara".
 - **Doğrulama:** `flutter analyze` temiz; `flutter test` **44/44** (34 mevcut + 4 journey + 3 geocoding + 3 network; gerçek yanıt gövdeleri MockClient ile).
-- **Sürüm:** `1.4.0+5`; APK `releases/ETUS-v1.4.0.apk` olarak eklendi; push sonrası CI (analyze+test+build) otomatik **v1.4.0** Release oluşturur.
+- **Sürüm:** `1.4.0+5`; APK `releases/ETUS-v1.4.0.apk` olarak eklendi (22.482.642 bayt); push sonrası CI (analyze+test+build) otomatik **v1.4.0** Release oluşturur.
+- **CI yeşil, Release doğrulandı:** run `38600877371` → `Analyze & Test` 47 sn + `Build Flutter Release APK` 3 dk 51 sn, ikisi de başarılı. **GitHub Release v1.4.0** oluştu: asset `ETUS-v1.4.0.apk` (22.475.483 bayt), `gh release view v1.4.0` ile teyit edildi. Commit: `cbe5ff4` → `origin/main`.
