@@ -1,7 +1,7 @@
 name: etus_mobile
 description: "Edirne ETUS Akıllı Durak, Rota ve Google Maps Asistanı"
 publish_to: "none"
-version: 1.5.0+6
+version: 1.5.1+7
 
 environment:
   sdk: ">=3.0.0 <4.0.0"

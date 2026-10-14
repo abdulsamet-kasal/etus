@@ -71,3 +71,11 @@
 - **Doğrulama:** `flutter analyze` temiz; `flutter test` **47/47**.
 - **Sürüm:** `1.5.0+6`; APK `releases/ETUS-v1.5.0.apk` (22.504.072 bayt); push sonrası CI otomatik **v1.5.0** Release oluşturur.
 - **CI yeşil, Release doğrulandı:** run `38603998134` → `Analyze & Test` 51 sn + `Build Flutter Release APK` 4 dk 3 sn, ikisi de başarılı. **GitHub Release v1.5.0** oluştu: asset `ETUS-v1.5.0.apk` (22.495.673 bayt), `gh release view v1.5.0` ile teyit edildi. Commit: `63f9daf` → `origin/main`.
+
+### 2026-10-14 — v1.5.1: Kalıcı imza (güncelleme çakışması düzeltmesi) + release notları
+- **Sorun:** yeni APK eskinin üstüne kurulmuyor, "paket çakışması" veriyordu. Kök neden: `android/app/build.gradle` release derlemeyi `signingConfigs.debug` ile imzalıyordu; debug anahtarı her makinede farklı (yerel PC vs her seferinde sıfırlanan CI koşucusu) → imzalar tutmuyor → Android güncellemeyi reddediyordu.
+- **Çözüm:** 30 yıl geçerli kalıcı anahtar üretildi (`android/app/etus-release.jks`, alias `etus`, RSA-2048). `build.gradle` `key.properties` varsa release imzasını kullanıyor, yoksa debug'a düşüyor. Anahtar ve şifreler git'e girmez (repo herkese açık): yerelde gitignore'lı dosyalarda, CI'da GitHub Secrets'ta (`ANDROID_KEYSTORE_BASE64/PASSWORD`, `ANDROID_KEY_PASSWORD/ALIAS`). Workflow derlemeden önce anahtarı kuruyor.
+- **Önemli:** telefondaki eski (debug imzalı) sürüm **bir kez silinip** v1.5.1 temiz kurulmalı; bundan sonraki tüm sürümler aynı imzayı taşıyacağı için güncelleme olarak gelecek.
+- **Release notları:** workflow artık `generate_release_notes` yerine AGENTS.md'deki **son kayıt**tan not üretiyor (`body_path: RELEASE_NOTES.md`). v1.5.0'ın notları da geriye dönük olarak günlüğe uygun hâle getirildi (`gh release edit`).
+- **Doğrulama:** `flutter analyze` temiz; `flutter test` **47/47** (kod değişikliği yok, imza/workflow değişikliği).
+- **Sürüm:** `1.5.1+7`; APK `releases/ETUS-v1.5.1.apk`; push sonrası CI otomatik **v1.5.1** Release oluşturur (günlükten notlarla).

@@ -16,6 +16,11 @@ etus_mobile/.flutter-plugins-dependencies
 etus_mobile/android/.gradle
 etus_mobile/android/local.properties
 etus_mobile/android/**/build/
+# Release imza anahtarı ve şifreleri ASLA git'e girmez (repo herkese açık).
+# CI bu dosyaları GitHub Secrets'tan üretir. Yedekleri güvenli bir yerde sakla:
+# etus_mobile/android/app/etus-release.jks + etus_mobile/android/key.properties
+etus_mobile/android/key.properties
+etus_mobile/android/app/etus-release.jks
 
 # iOS
 etus_mobile/ios/.symlinks/

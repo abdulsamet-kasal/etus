@@ -79,6 +79,21 @@ jobs:
         working-directory: etus_mobile
         run: flutter pub get
 
+      - name: Set up Release Keystore
+        # Kalıcı imza anahtarı secret'lardan kurulur; böylece yerelde ve CI'da
+        # derlenen tüm APK'lar aynı imzayı taşır ve güncellemeler çakışmaz.
+        working-directory: etus_mobile/android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > app/etus-release.jks
+          {
+            echo "storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+            echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}"
+            echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}"
+            echo "storeFile=etus-release.jks"
+          } > key.properties
+
       - name: Build Release APK
         working-directory: etus_mobile
         run: flutter build apk --release
@@ -108,6 +123,14 @@ jobs:
           cp "$SRC" "$DEST"
           ls -l "$DEST"
 
+      # Sürüm notları AGENTS.md günlüğündeki SON kayıttan üretilir (yeni kayıtlar
+      # dosyanın en altına eklenir); böylece release sayfasında otomatik özet
+      # yerine gerçek değişiklikler yazar.
+      - name: Build Release Notes From AGENTS.md
+        run: |
+          awk '/^### /{section=""} {section=section $0 "\n"} END{printf "%s", section}' AGENTS.md > RELEASE_NOTES.md
+          head -4 RELEASE_NOTES.md
+
       - name: Check Whether Release Already Exists
         id: release_check
         env:
@@ -126,7 +149,7 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.title }}
-          generate_release_notes: true
+          body_path: RELEASE_NOTES.md
           files: etus_mobile/build/app/outputs/flutter-apk/${{ steps.version.outputs.asset }}
 
       - name: Upload APK as Build Artifact
