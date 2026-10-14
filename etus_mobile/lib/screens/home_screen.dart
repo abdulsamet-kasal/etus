@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../models/stop.dart';
 import '../models/route_line.dart';
 import '../data/etus_data.dart';
+import '../services/geocoding_service.dart';
 import '../services/smart_search_service.dart';
 import '../services/location_service.dart';
 import '../services/journey_service.dart';
@@ -28,6 +31,12 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _selectedMatchReason;
   List<JourneyOption> _journeyOptions = [];
 
+  /// Gerçek yer sonuçları (Nominatim). Yerel eşleşme zayıfsa bunlar gösterilir;
+  /// sahte durak eşleşmesi üretilmez.
+  List<GeocodedPlace> _osmSuggestions = [];
+  bool _osmLoading = false;
+  Timer? _osmDebounce;
+
   /// Elle seçilen kalkış (GPS yerine kullanıcı başka durak seçebilir)
   Stop? _customOrigin;
 
@@ -40,6 +49,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _osmDebounce?.cancel();
     super.dispose();
   }
 
@@ -62,17 +72,52 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// Arama Metni Değiştiğinde Akıllı Arama Motorunu Çalıştır
+  ///
+  /// Yerel sonuçlar güven skoru 60+ ise gösterilir; düşük skorlu zorlama
+  /// eşleşmeler gizlenir (sahte sonuç şikâyeti). Gerçek adresler Nominatim
+  /// ile aranır ve ayrı bölümde listelenir.
   void _onSearchChanged(String query) {
     if (query.trim().isEmpty) {
+      _osmDebounce?.cancel();
       setState(() {
         _smartSuggestions = [];
+        _osmSuggestions = [];
+        _osmLoading = false;
       });
       return;
     }
 
-    final results = SmartSearchService.search(query);
+    final results = SmartSearchService.search(query)
+        .where((r) => r.score >= 60)
+        .toList();
     setState(() {
       _smartSuggestions = results;
+    });
+
+    // Gerçek yer araması (debounce 700 ms, en az 3 harf).
+    _osmDebounce?.cancel();
+    if (query.trim().length < 3) {
+      setState(() {
+        _osmSuggestions = [];
+        _osmLoading = false;
+      });
+      return;
+    }
+    _osmDebounce = Timer(const Duration(milliseconds: 700), () async {
+      if (!mounted) return;
+      setState(() => _osmLoading = true);
+      try {
+        final places = await GeocodingService.search(query.trim());
+        if (!mounted) return;
+        // Kullanıcı yazmaya devam ettiyse eski sonucu gösterme.
+        if (_searchController.text.trim() != query.trim()) return;
+        setState(() => _osmSuggestions = places);
+      } catch (_) {
+        if (!mounted) return;
+        setState(() => _osmSuggestions = []);
+      } finally {
+        if (mounted) setState(() => _osmLoading = false);
+      }
     });
   }
 
@@ -89,7 +134,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// Doğrudan veya Akıllı En İyi Eşleşmeyi Arama
-  void _executeSearch() {
+  ///
+  /// Güven skoru 70+ yerel eşleşme yoksa sahte durak seçilmez; önce gerçek
+  /// yer (OSM) denenir, o da yoksa kullanıcı haritaya yönlendirilir.
+  Future<void> _executeSearch() async {
     final query = _searchController.text.trim();
     if (query.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -99,14 +147,48 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     final results = SmartSearchService.search(query);
-    if (results.isNotEmpty) {
-      final top = results.first;
+    final strong =
+        results.where((r) => r.score >= 70).toList();
+    if (strong.isNotEmpty) {
+      final top = strong.first;
       _selectDestination(top.stop, top.matchedReason);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('"$query" için uygun bir yer veya durak anlaşılamadı.')),
-      );
+      return;
     }
+
+    // Yerel güvenilir eşleşme yok → gerçek yeri dene.
+    try {
+      final places = await GeocodingService.search(query);
+      if (!mounted) return;
+      if (places.isNotEmpty) {
+        _openPlaceOnMap(places.first);
+        return;
+      }
+    } catch (_) {
+      // OSM hatası aşağıda dürüstçe bildirilir.
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+          content: Text(
+              '"$query" için kayıtlı durak bulunamadı; haritada aratarak gerçek konumu seçebilirsiniz.')),
+    );
+  }
+
+  /// Gerçek bir adresi haritada varış olarak açar.
+  void _openPlaceOnMap(GeocodedPlace place) {
+    FocusScope.of(context).unfocus();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MapScreen(
+          initialLat: _userLocation?.latitude,
+          initialLng: _userLocation?.longitude,
+          initialDestLat: place.lat,
+          initialDestLng: place.lng,
+          initialDestLabel: place.name,
+        ),
+      ),
+    );
   }
 
   /// Kalkış noktasını belirle (GPS veya elle seçilen durak)
@@ -363,8 +445,12 @@ class _HomeScreenState extends State<HomeScreen> {
             // 2. AKILLI HEDEF ARAMA KUTUSU (Semantik NLP Destekli)
             _buildSearchBox(),
 
-            // 3. ANLIK AKILLI ÖNERİ LİSTESİ (Kullanıcı Yazarken)
-            if (_smartSuggestions.isNotEmpty) _buildSuggestionsList(),
+            // 3. ANLIK AKILLI ÖNERİ LİSTESİ (yerel + gerçek harita yerleri)
+            if (_smartSuggestions.isNotEmpty ||
+                _osmSuggestions.isNotEmpty ||
+                _osmLoading ||
+                _searchController.text.trim().length >= 3)
+              _buildSuggestionsList(),
 
             const SizedBox(height: 14),
 
@@ -541,7 +627,7 @@ class _HomeScreenState extends State<HomeScreen> {
         onChanged: _onSearchChanged,
         onSubmitted: (_) => _executeSearch(),
         decoration: InputDecoration(
-          hintText: 'Nereye gitmek istiyorsunuz? (Örn: hastane, avm, tip, uni...)',
+          hintText: 'Nereye? Durak, adres veya yer yazın (örn: Meriç Köprüsü)...',
           hintStyle: TextStyle(fontSize: 13, color: Colors.grey.shade400),
           prefixIcon: Icon(Icons.search, color: Colors.blue.shade700),
           suffixIcon: IconButton(
@@ -556,6 +642,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// Akıllı Öneri Listesi (Canlı Algılama)
+  ///
+  /// Üstte güvenilir yerel duraklar, altta gerçek harita yerleri (OSM).
+  /// Eşleşme yoksa boş liste yerine "haritada ara" önerisi çıkar.
   Widget _buildSuggestionsList() {
     return Container(
       margin: const EdgeInsets.only(top: 6),
@@ -572,26 +661,99 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       child: Column(
-        children: _smartSuggestions.take(4).map((item) {
-          return ListTile(
-            dense: true,
-            leading: Icon(
-              item.score >= 85 ? Icons.auto_awesome : Icons.place,
-              color: item.score >= 85 ? Colors.amber.shade700 : Colors.blue,
-              size: 20,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ..._smartSuggestions.take(4).map((item) {
+            return ListTile(
+              dense: true,
+              leading: Icon(
+                item.score >= 85 ? Icons.auto_awesome : Icons.place,
+                color:
+                    item.score >= 85 ? Colors.amber.shade700 : Colors.blue,
+                size: 20,
+              ),
+              title: Text(
+                item.stop.name,
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+              subtitle: Text(
+                '${item.matchedReason} (%${item.score.round()})',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+              ),
+              trailing: const Icon(Icons.chevron_right, size: 18),
+              onTap: () =>
+                  _selectDestination(item.stop, item.matchedReason),
+            );
+          }),
+          if (_osmLoading)
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: 8),
+                  Text('Haritada gerçek yer aranıyor...',
+                      style: TextStyle(fontSize: 12)),
+                ],
+              ),
             ),
-            title: Text(
-              item.stop.name,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+          for (final p in _osmSuggestions.take(3))
+            ListTile(
+              dense: true,
+              leading:
+                  const Icon(Icons.travel_explore, color: Colors.teal, size: 20),
+              title: Text(
+                p.name,
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+              subtitle: Text(
+                'Harita konumu • dokun: otobüs önerisi',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+              ),
+              trailing: const Icon(Icons.map, size: 18),
+              onTap: () => _openPlaceOnMap(p),
             ),
-            subtitle: Text(
-              '${item.matchedReason} (%${item.score.round()})',
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+          if (_smartSuggestions.isEmpty &&
+              !_osmLoading &&
+              _searchController.text.trim().length >= 3)
+            ListTile(
+              dense: true,
+              leading:
+                  const Icon(Icons.map_outlined, color: Colors.green, size: 20),
+              title: const Text(
+                'Haritada ara',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+              subtitle: const Text(
+                'Kayıtlı durak yoksa gerçek konumu haritada bulup otobüs önerisi alın',
+                style: TextStyle(fontSize: 11),
+              ),
+              trailing: const Icon(Icons.chevron_right, size: 18),
+              onTap: () {
+                final q = _searchController.text.trim();
+                if (q.isEmpty) return;
+                if (_osmSuggestions.isNotEmpty) {
+                  _openPlaceOnMap(_osmSuggestions.first);
+                } else {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => MapScreen(
+                        initialLat: _userLocation?.latitude,
+                        initialLng: _userLocation?.longitude,
+                      ),
+                    ),
+                  );
+                }
+              },
             ),
-            trailing: const Icon(Icons.chevron_right, size: 18),
-            onTap: () => _selectDestination(item.stop, item.matchedReason),
-          );
-        }).toList(),
+        ],
       ),
     );
   }
