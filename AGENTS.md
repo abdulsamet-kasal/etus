@@ -78,4 +78,6 @@
 - **Önemli:** telefondaki eski (debug imzalı) sürüm **bir kez silinip** v1.5.1 temiz kurulmalı; bundan sonraki tüm sürümler aynı imzayı taşıyacağı için güncelleme olarak gelecek.
 - **Release notları:** workflow artık `generate_release_notes` yerine AGENTS.md'deki **son kayıt**tan not üretiyor (`body_path: RELEASE_NOTES.md`). v1.5.0'ın notları da geriye dönük olarak günlüğe uygun hâle getirildi (`gh release edit`).
 - **Doğrulama:** `flutter analyze` temiz; `flutter test` **47/47** (kod değişikliği yok, imza/workflow değişikliği).
-- **Sürüm:** `1.5.1+7`; APK `releases/ETUS-v1.5.1.apk`; push sonrası CI otomatik **v1.5.1** Release oluşturur (günlükten notlarla).
+- **Sürüm:** `1.5.1+7`; APK `releases/ETUS-v1.5.1.apk` (22.504.143 bayt); push sonrası CI otomatik **v1.5.1** Release oluşturur (günlükten notlarla).
+- **CI yeşil, Release doğrulandı:** run `38605449763` → `Analyze & Test` 59 sn + `Build Flutter Release APK` 3 dk 22 sn, ikisi de başarılı (`Set up Release Keystore` adımı çalıştı). **GitHub Release v1.5.1** oluştu: asset `ETUS-v1.5.1.apk` (22.495.732 bayt) + gövdede AGENTS.md v1.5.1 kaydı (`gh release view` ile teyit). Commit: `a262b7f` → `origin/main`.
+- **Not:** ara izlemede yanlış koşu (`38604773204`, docs commit'li bc9b36f) takip edilmiş; o koşu v1.5.0 zaten var diye upload'u doğru şekilde atlamış. Gerçek v1.5.1 koşusu `38605449763` (headSha a262b7f).
