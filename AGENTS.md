@@ -69,4 +69,5 @@
 - **Harita sadeleşmesi (`screens/map_screen.dart`):** üstte tek arama kartı (Nereden?/Nereye? + değiştir), AppBar'da yalnızca filtre + katman; GPS ve rota düğmeleri AppBar'dan alındı (konum FAB'ı + alt çubuk). Alt çubuk: **Otobüs Bul + Git** ve ince durum satırı (`N durak • M canlı araç`). Öneri kartı zaman çizelgesi biçiminde (yürü/otobüs/yürü). Filtre sayfasına hat arama kutusu eklendi. Arama sayfası bölüm başlıklı (DURAKLAR / ADRES VE YERLER), durak araması hat kodunu da kapsar. Harita dokunuşunda ters coğrafi kodlamayla gerçek adres etiketi.
 - **Test:** `map_screen_test` mock'u `pathInfo` için gerçekçi gövde döndürüyor (önceki mock şema kayması üretip uyarı bandıyla işaretçiyi kapatıyordu); `geocoding_service_test` çift kaynak + reverse kapsıyor.
 - **Doğrulama:** `flutter analyze` temiz; `flutter test` **47/47**.
-- **Sürüm:** `1.5.0+6`; APK `releases/ETUS-v1.5.0.apk`; push sonrası CI otomatik **v1.5.0** Release oluşturur.
+- **Sürüm:** `1.5.0+6`; APK `releases/ETUS-v1.5.0.apk` (22.504.072 bayt); push sonrası CI otomatik **v1.5.0** Release oluşturur.
+- **CI yeşil, Release doğrulandı:** run `38603998134` → `Analyze & Test` 51 sn + `Build Flutter Release APK` 4 dk 3 sn, ikisi de başarılı. **GitHub Release v1.5.0** oluştu: asset `ETUS-v1.5.0.apk` (22.495.673 bayt), `gh release view v1.5.0` ile teyit edildi. Commit: `63f9daf` → `origin/main`.
